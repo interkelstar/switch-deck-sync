@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -16,6 +17,22 @@ spec.loader.exec_module(release)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_launcher_uses_gio_environment_if_desktop_field_is_missing(self):
+        with tempfile.TemporaryDirectory(prefix='installer fallback ') as temp:
+            root = Path(temp)
+            marker = root / 'opened'
+            (root / 'install.py').write_text('from pathlib import Path\nPath(' + repr(str(marker)) + ').touch()\n')
+            desktop = root / 'Install.desktop'
+            shutil.copy2(ROOT / 'Install.desktop', desktop)
+            command = next(line[5:] for line in desktop.read_text().splitlines() if line.startswith('Exec='))
+            args = shlex.split(command)
+            self.assertEqual(args.pop(), '%k')
+            env = {k: v for k, v in os.environ.items() if k not in ('LD_LIBRARY_PATH', 'PYTHONHOME', 'PYTHONPATH')}
+            env['GIO_LAUNCHED_DESKTOP_FILE'] = str(desktop)
+            result = subprocess.run(args, capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(marker.exists())
+
     def test_archives_are_reproducible_and_manifest_matches_actual_files(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -36,8 +53,11 @@ class ReleaseTests(unittest.TestCase):
                 self.assertFalse(any(Path(n).name in release.FORBIDDEN for n in z.namelist()))
 
     def test_downloaded_desktop_launcher_resolves_its_package_in_a_path_with_spaces(self):
-        if not shutil.which('gio'):
-            self.skipTest('GLib launcher unavailable')
+        env = {k: v for k, v in os.environ.items() if k not in ('LD_LIBRARY_PATH', 'PYTHONHOME', 'PYTHONPATH')}
+        probe = subprocess.run(['/usr/bin/python3', '-c', 'from gi.repository import Gio; assert Gio.DesktopAppInfo'],
+                               env=env, capture_output=True)
+        if probe.returncode:
+            self.skipTest('System Python GObject bindings unavailable; required in CI')
         with tempfile.TemporaryDirectory(prefix='downloaded installer ') as temp:
             root = Path(temp)
             marker = root / 'was opened'
@@ -45,10 +65,11 @@ class ReleaseTests(unittest.TestCase):
             desktop = root / 'Install.desktop'
             shutil.copy2(ROOT / 'Install.desktop', desktop)
             desktop.chmod(0o755)
-            # The desktop launcher uses the OS Python. GitHub setup-python exports
-            # its own libpython path, which must not override /usr/bin/python3.
-            env = {k: v for k, v in os.environ.items() if k not in ('LD_LIBRARY_PATH', 'PYTHONHOME', 'PYTHONPATH')}
-            result = subprocess.run(['gio', 'launch', str(desktop)], capture_output=True, text=True, env=env)
+            # Match a file manager: load the desktop file by filename. Older
+            # `gio launch` implementations reconstruct it from a keyfile, losing
+            # its filename and therefore both %k and GIO_LAUNCHED_DESKTOP_FILE.
+            code = 'import sys; from gi.repository import Gio; app=Gio.DesktopAppInfo.new_from_filename(sys.argv[1]); assert app; app.launch([],None)'
+            result = subprocess.run(['/usr/bin/python3', '-c', code, str(desktop)], capture_output=True, text=True, env=env)
             self.assertEqual(result.returncode, 0, result.stderr)
             import time
             for _ in range(100):

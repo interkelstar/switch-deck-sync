@@ -10,6 +10,8 @@ jobs:
         python: ['3.10', '3.12']
     steps:
       - uses: actions/checkout@v4
+      - name: Desktop launcher test dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-gi gir1.2-glib-2.0
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
