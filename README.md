@@ -2,7 +2,7 @@
 
 Portable Nintendo Switch libraries and manual Wi-Fi save synchronisation for SteamOS.
 
-**Preview 0.2.0.** Supports native Ryujinx / Ryujinx AppImage. The setup wizard is
+**Preview 0.2.1.** Supports native Ryujinx / Ryujinx AppImage. The setup wizard is
 available in English and Russian; the controller-friendly sync interface is currently
 in Russian. Steam Deck hardware was used for the earlier prototype. The unified
 installer has Linux integration tests; a fresh Steam Machine installation is the next
@@ -12,8 +12,11 @@ hardware acceptance test. This is not yet a stable, broadly tested release.
 
 ## Install on SteamOS
 
-1. Install EmuDeck and a supported Ryujinx build. Start Ryujinx once, configure this
-   computer's controls, and install your own dumped keys and firmware.
+1. Install EmuDeck and a supported Ryujinx build. For an already prepared card,
+   install to Internal Storage with that card removed, then start and close Ryujinx
+   once and insert the card. Missing keys on this first empty launch are expected:
+   the wizard will connect the keys and firmware already on the card. For a fresh
+   library, first install your own dumped keys and firmware in Ryujinx.
 2. Download a release archive, extract it to a normal writable folder, and open
    **Install.desktop** in Desktop Mode. KDE may ask you to trust or execute this
    downloaded launcher. The terminal alternative is `sh install.sh` in that folder.
@@ -30,6 +33,13 @@ required on a supported SteamOS installation. Runtime prerequisites are Python 3
 KDE `kdialog`, `lsblk`, `udisksctl`, SDL2, SDL2_ttf and DejaVu Sans. Missing dependencies
 are reported. The current wizard accepts ext4 cards. Flatpak emulators, other emulator
 families, Windows and multiple MMC readers are not supported by this preview.
+
+When EmuDeck is installed, game launches reuse its installed Ryujinx AutoMap function
+for this computer's controller settings. Detection runs again in Game Mode; a Desktop
+launch without a controller keeps the current mapping. Disable AutoMap in EmuDeck if
+you prefer manual mappings. Only controls are imported from this function. The original
+EmuDeck configuration, library paths and cloud/save setup are not rewritten. This bridge
+is not the complete EmuDeck launcher and does not run emulator updates or migrations.
 
 EmuDeck installation: <https://manual.emudeck.com/install-guide/1_index/>.
 EmuDeck and emulator downloads are handled separately; none are bundled here.
@@ -127,6 +137,13 @@ files and emits ZIP, tar.gz and SHA-256 checksums. GitHub Actions runs tests on 
 эмулятор, предложит выбрать считыватель и подключит готовую карту либо подготовит новую
 библиотеку из твоих данных Ryujinx. Оригиналы сохраняются. На время добавления ярлыков
 Steam завершится и затем откроется снова. SSH и ручные правки не нужны.
+
+Для готовой карты сначала установи EmuDeck на внутренний накопитель с вынутой картой,
+один раз открой и закрой Ryujinx, затем вставь карту и запусти мастер. Предупреждение
+об отсутствии ключей при первом пустом запуске ожидаемо: мастер подключит данные
+с карты. При наличии EmuDeck каждый запуск игры использует его AutoMap для управления
+на этом компьютере. Настройки управления вручную можно сохранить, отключив AutoMap
+в EmuDeck. Остальные данные переносимой библиотеки эта функция не меняет.
 
 На Switch установи `switch/ftpsrv-save-sync.nro` и внеси параметры из примера конфигурации.
 Запусти сервер. В Steam открой **Switch Deck Sync → Настройки**, укажи адрес сервера,
