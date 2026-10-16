@@ -1,150 +1,154 @@
 # Switch Deck Sync
 
-Portable Nintendo Switch libraries and manual Wi-Fi save synchronisation for SteamOS.
+Portable Nintendo Switch card data and manual Wi-Fi save synchronisation for SteamOS.
 
-**Preview 0.2.0.** Supports native Ryujinx / Ryujinx AppImage. The setup wizard is
-available in English and Russian; the controller-friendly sync interface is currently
-in Russian. Steam Deck hardware was used for the earlier prototype. The unified
-installer has Linux integration tests; a fresh Steam Machine installation is the next
-hardware acceptance test. This is not yet a stable, broadly tested release.
+**Preview 0.3.0.** Games launch directly through the existing EmuDeck Ryujinx launcher.
+This application does not launch the emulator, call AutoMap, replace controller
+settings, patch the EmuDeck backend, or add a root-data argument to game shortcuts.
+The setup wizard is English/Russian; the save-sync interface is currently Russian.
 
 ![Switch Deck Sync](art/grid.png)
 
-## Install on SteamOS
+## Install on a new SteamOS computer
 
-1. Install EmuDeck and a supported Ryujinx build. Start Ryujinx once, configure this
-   computer's controls, and install your own dumped keys and firmware.
-2. Download a release archive, extract it to a normal writable folder, and open
-   **Install.desktop** in Desktop Mode. KDE may ask you to trust or execute this
-   downloaded launcher. The terminal alternative is `sh install.sh` in that folder.
-3. Choose the card reader, the Ryujinx executable, and its existing data folder
-   containing `Config.json`. Detected paths appear in the wizard; browsing is available.
-4. A prepared library is attached directly. For a fresh card, choose the game folder(s)
-   and let the wizard copy and verify the profile, saves, keys, firmware and selected
-   update/DLC files. Source files are retained. No formatting takes place.
-5. Close games before continuing. The wizard briefly exits Steam, backs up changed
-   files, adds shortcuts and artwork, and reopens Steam.
+1. With the prepared card removed, install EmuDeck using **Custom Mode**, **Internal
+   Storage**, **Ryujinx**, and **Steam ROM Manager**. ES-DE is optional. The internal
+   Emulation folder is a stable host entry point; actual Switch content stays on the card.
+2. Open and close Ryujinx once using the application menu. For an existing prepared
+   card, a missing prod.keys warning at this empty first launch is expected. The card
+   already contains its dumped keys, installed firmware and profile.
+3. Insert the card. Download the named installer ZIP from a release's **Assets**,
+   extract it to a writable folder, and open **Install.desktop** in Desktop Mode.
+   KDE may ask you to trust or execute the downloaded launcher. Terminal alternative:
+   run sh install.sh from the extracted folder.
+4. Choose English or Russian and the card reader. EmuDeck's standard paths are
+   detected automatically. A prepared card is attached directly. On a fresh ext4 card
+   the wizard can copy and verify your existing Ryujinx data and game folders;
+   prepare that original emulator with your own keys and firmware first.
+5. Close games and allow the wizard to briefly exit Steam. It backs up the affected
+   host folders, attaches card data, installs the separate save-sync app and creates
+   shortcuts pointing straight to the stock EmuDeck launcher. Steam reopens.
+6. Launch a game normally in Game Mode. AutoMap, manual controls, graphics and launch
+   fixes remain under EmuDeck/Ryujinx control. If AutoMap was disabled, it stays disabled.
 
-No SSH, administrator password, system packages or manual configuration edits are
-required on a supported SteamOS installation. Runtime prerequisites are Python 3.10+,
-KDE `kdialog`, `lsblk`, `udisksctl`, SDL2, SDL2_ttf and DejaVu Sans. Missing dependencies
-are reported. The current wizard accepts ext4 cards. Flatpak emulators, other emulator
-families, Windows and multiple MMC readers are not supported by this preview.
+No SSH, administrator password, system package installation or manual path editing is
+needed on a supported SteamOS installation. This version requires the base EmuDeck
+library on Internal Storage, native EmuDeck Ryujinx, an ext4 card, Python 3.10+, KDE
+kdialog, systemd user services, lsblk, udisksctl, SDL2/SDL2_ttf and DejaVu Sans.
+Flatpak Ryujinx, portable emulator roots, Windows and multiple MMC readers are outside
+this preview. Missing prerequisites stop setup with a message.
 
-EmuDeck installation: <https://manual.emudeck.com/install-guide/1_index/>.
-EmuDeck and emulator downloads are handled separately; none are bundled here.
+## What is installed
 
-## Set up the Switch
+EmuDeck's launcher files and backend are unchanged. The existing Ryujinx Config.json
+retains every setting except its game-directory list, which is set to EmuDeck's normal
+roms/switch location. Existing saves/profile folders are kept in installer backups.
 
-Copy `switch/ftpsrv-save-sync.nro` to `/switch/` on the Switch SD card. Merge the
-settings from `switch/config.ini.example` into `/config/ftpsrv/config.ini`, keeping
-a backup of any existing configuration. The detailed [Switch guide](docs/SWITCH.md)
-describes the required settings and the supplied source patch.
+A small **user data service** connects the selected reader to these ordinary paths.
+It only manages data links and portable update/DLC metadata. It never starts an
+emulator or runs controller/graphics configuration. Steam ROM Manager and ES-DE can
+see the same roms/switch directory. EmuDeck's standard patchesAndDlc folder is linked to the card
+as well, so new update/DLC selections can remain portable. New titles or renamed ROM files can be added or
+refreshed through Steam ROM Manager as usual.
 
-Start **ftpsrv Save Sync** through homebrew. Press **+** to exit it. Keep it open only
-while syncing on your local network. This preview uses anonymous, unencrypted FTP.
+The reader, not a particular card UUID, selects the library. Any prepared card can be
+used in that reader. A USB reader is associated with its hardware connection; keep it
+in the same USB port. If the slot contains an ordinary Steam card, the service does
+not fall back to a Switch card in another reader.
 
-## First synchronisation
+Saves, profile, keys, firmware and sync history stay on the card. Controller settings
+and shader caches stay on each computer. Cache folders are separate for different
+library identities. Copying the complete Emulation folder to a larger ext4 card is
+enough; no UUID registration is required.
 
-Close the game on both devices. In Steam, open **Switch Deck Sync**, then **Настройки**
-(Settings). Enter the Switch's displayed IPv4 address and port, choose the Switch and
-Ryujinx profiles, and select games. Use **Синхронизировать** (Synchronise).
+Close Ryujinx and save sync before ejecting or changing cards. The service refuses to
+attach a different profile while either is running. Without a prepared card the data
+links cannot create a substitute local save library. Physical removal during writes
+is unsupported. A controller or resolution issue remains a normal EmuDeck/Ryujinx
+setting; this service does not repair it.
 
-Games need an existing account save on both sides. If Ryujinx has no save yet, launch
-the game through **Switch Library (Ryujinx)** or its new Steam shortcut, create a save,
-close the game, and refresh the selection. Automatic creation of emulator save containers
-from Switch-only saves is not implemented.
+## Set up the physical Switch
 
-The client compares complete save contents with the last common state. If one side
-changed, it copies that whole save. If both changed, or different saves have no common
-baseline, you choose which copy to keep. It does not infer progress from file dates or
-merge individual files. Both versions are backed up before replacement, and writes are
-read back and verified. Interrupted transfers retain a recovery journal. Finish recovery
-before launching the affected game on Switch.
+Copy switch/ftpsrv-save-sync.nro to /switch/ on the Switch SD card. Merge the supplied
+switch/config.ini.example settings into /config/ftpsrv/config.ini, preserving a backup.
+See [Switch setup](docs/SWITCH.md) for the required settings, source and patch.
 
-Only account saves are included. BCAT, system saves, device saves and cross-version
-save conversion are outside the scope of this release. Compatibility depends on the
-game and its update/DLC versions. The prototype was tested with Super Mario Odyssey,
-Mario Kart 8 Deluxe and Zelda: Breath of the Wild; other games need their own verification.
+Start **ftpsrv Save Sync** through homebrew. Press **+** to exit. This preview uses
+anonymous, unencrypted FTP on your local network.
 
-## Moving between computers or cards
+In Steam, open **Switch Deck Sync → Настройки**. Enter the Switch address and port,
+choose both profiles and the games, then synchronise with games closed on both sides.
+On an already prepared card these settings and sync history are retained.
 
-Each computer needs its emulator and a one-time run of this installer. Move the card,
-run the installer on the new computer, and choose the existing library. Saves and sync
-history stay on the card; controller settings and shader caches stay on each computer.
-Once installed, switching prepared cards requires no registration.
+Whole-save contents are compared against the last common state. If only one side
+changed, that complete save is copied. If both changed, or no common baseline exists,
+you choose which version to keep. File timestamps do not decide progress. Both
+versions are backed up and writes are read back and verified. Interrupted transfers
+retain a recovery journal: repeat sync to recover before launching that Switch game.
 
-The configured **reader/slot**, not the card UUID, selects the library. A USB reader can
-be selected explicitly and is identified by its hardware connection path. Keep it in
-the same port. An unrelated Steam-games card does not cause fallback to another drive.
+Only account saves are included. BCAT/system/device saves and cross-version conversion
+are outside scope. Games need an existing Ryujinx account-save container before a
+first import; automatic creation of those containers is not implemented. Tested
+prototype titles were Super Mario Odyssey, Mario Kart 8 Deluxe and Zelda: Breath of
+the Wild; other games require their own compatibility check.
 
-To move to a larger card, copy the complete `Emulation` folder to a suitably formatted
-card while games and sync are closed. No card UUID changes are needed. Swapping cards
-while an emulator or sync is running is unsupported. Eject the card normally.
+## Restore and maintenance
 
-Existing standalone Ryujinx setup is retained. This installer creates a separate
-managed Ryujinx configuration and Steam shortcuts. It does **not** rewrite EmuDeck's
-global paths or automatically integrate every frontend. Use the installed shortcuts
-for the portable library. ES-DE integration remains a separate future installer feature.
-New games appear in Ryujinx's library; rerun this installer to add their individual
-Steam shortcuts. Files with title IDs in their names support those shortcuts; files
-without identifiable IDs remain available in Ryujinx's browser. Existing shortcuts for
-the same name or recognisable Ryujinx title ID keep their Steam IDs and input settings.
+Rerun Install.desktop and choose **Restore the previous settings**. Games on the card
+are retained; original host data directories, settings and Steam shortcuts are restored.
+An interrupted installation is detected and offers recovery before retrying.
 
-## Restore and troubleshooting
+Host files: ~/.local/share/switch-deck-sync/
+User service: switch-deck-sync-card.service
+Backups: ~/.local/share/switch-deck-sync/backups/
 
-Rerun the installer and choose **Restore the previous settings** to undo the last
-installation. This restores changed settings and shortcuts and keeps card games/saves.
-An interrupted installation is detected and offered recovery on the next run. If the
-initial card copy was interrupted, repeat preparation with the same source folders;
-verified staging files are reused. Original source data is never removed automatically.
+An EmuDeck reset/update may recreate its data links. The service detects a changed
+connection and stops attaching card data instead of overriding EmuDeck. Close games
+and rerun this installer to reconnect. Your card and original host data are retained.
 
-Computer files: `~/.local/share/switch-deck-sync/`.
-Private setup backups: `~/.local/share/switch-deck-sync/backups/`.
-Card data and layout: [architecture](docs/ARCHITECTURE.md).
-Hardware acceptance procedure: [Steam Machine test](docs/STEAM-MACHINE-TEST.md).
+The old 0.2.x previews used custom game launchers. Restore that older installation
+using its original installer before moving that host to this architecture. The first
+Steam Machine client is a fresh host and needs no such migration. The separate older
+Deck prototype continues working with the same prepared card.
 
-The installer's restore does not revert progress made by playing or syncing after
-installation. Back up important saves separately. Do not share your installed card
-or its runtime settings/backups as a clean distribution.
+The 0.2.1 preview was withdrawn because its AutoMap bridge did not meet this
+architecture. Do not use it for installation.
 
-## Development
+## Validation and development
 
-```sh
+Linux integration tests cover native shortcuts, preservation of AutoMap/manual
+settings, directory backups/rollback, prepared-card attachment, reader/card changes,
+missing cards, data-service restart, profile/cache separation and save transfer.
+A fresh Steam Machine hardware acceptance run is still pending.
+
 PYTHONPATH=app python3 -m unittest discover -s tests -v
 python3 scripts/build_release.py
-```
 
-Run these commands from a source checkout, rather than the installer artifact.
-Tests run on Linux with synthetic games, keys, firmware and profiles. No proprietary
-assets are included. The release builder uses an allowlist, checks for private runtime
-files and emits ZIP, tar.gz and SHA-256 checksums. GitHub Actions runs tests on Python
-3.10 and 3.12; a `v*` tag builds a GitHub prerelease. See [publishing](docs/PUBLISHING.md).
+The release builder uses an allowlist and reproducible ZIP/tar.gz archives. Keys,
+firmware, games, emulator binaries and personal saves/settings are not distributed.
 
 ## Русский
 
-Установка в Desktop Mode: распакуй архив и открой **Install.desktop**. Мастер найдёт
-эмулятор, предложит выбрать считыватель и подключит готовую карту либо подготовит новую
-библиотеку из твоих данных Ryujinx. Оригиналы сохраняются. На время добавления ярлыков
-Steam завершится и затем откроется снова. SSH и ручные правки не нужны.
+На новом компьютере сначала установи EmuDeck с выбором Internal Storage, Ryujinx и
+Steam ROM Manager, без вставленной подготовленной карты. Один раз открой и закрой
+Ryujinx; отсутствие ключей при первом пустом запуске ожидаемо. Вставь карту,
+скачай установочный ZIP из Assets, распакуй и открой Install.desktop.
 
-На Switch установи `switch/ftpsrv-save-sync.nro` и внеси параметры из примера конфигурации.
-Запусти сервер. В Steam открой **Switch Deck Sync → Настройки**, укажи адрес сервера,
-выбери профили и игры. Если сейва Ryujinx пока нет, сначала создай его запуском игры.
-Перед синхронизацией полностью закрывай игру на обоих устройствах.
+Мастер сам найдёт пути EmuDeck. Выбери считыватель и подтверди подключение готовой
+карты. SSH, ручные команды и копирование папок не нужны. Прежние папки компьютера
+сохранятся для восстановления. Игры будут запускаться напрямую штатным способом
+EmuDeck; AutoMap, ручные настройки управления и графики останутся у EmuDeck/Ryujinx.
 
-На новом компьютере повтори установку с готовой картой. Данные и история синхронизации
-поедут с картой, управление и кеши останутся локальными. Привязки к UUID карты нет.
-Для отката снова открой установщик и выбери восстановление прежних настроек.
+Фоновая служба отвечает только за подключение данных сменной карты. Сейвы и профиль
+живут на карте, настройки управления и кеши — на компьютере. Перед извлечением карты
+закрывай игры и синхронизацию. Для добавления новых игр используй обычный Steam ROM
+Manager. Восстановление прежней настройки доступно через повторный запуск мастера.
 
-Первая версия поддерживает обычный Ryujinx и AppImage, карты ext4 и запуск через
-созданные ярлыки Steam. Интеграция ES-DE, другие эмуляторы и английский интерфейс
-самой синхронизации пока в планах. Мастер установки уже двуязычный.
+Для обмена с настоящим Switch открой Switch Deck Sync, укажи адрес ftpsrv Save Sync,
+выбери профили и игры. Настройки и история синхронизации готовой карты сохраняются.
 
 ## Licence
 
-Client and installer: MIT, [LICENSE](LICENSE). Modified ftpsrv: separate MIT project by
-TotalJustice; attribution, upstream revision, patch and buildable source are in `switch/`.
-Artwork files and generation prompts are included in `art/`. This is an independent,
-unofficial project. Keys, firmware, games, DLC, emulator binaries and user saves are
-not distributed.
+Client and installer: MIT, [LICENSE](LICENSE). Modified ftpsrv: separate MIT project
+by TotalJustice; attribution, revision, patch and buildable source are in switch/.
+This is an independent, unofficial project.

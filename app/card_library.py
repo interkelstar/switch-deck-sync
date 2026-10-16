@@ -100,13 +100,13 @@ def map_paths(value,alias):
     if isinstance(value,dict):return {k:map_paths(v,alias) for k,v in value.items()}
     return value
 
-def portable_paths(value,alias,mount):
+def portable_paths(value,alias,mount,extra_paths=()):
     if isinstance(value,str):
-        for base in [str(alias),str(mount)]:
-            if value.startswith(base+'/'):return '@CARD@/'+value[len(base)+1:]
+        for base,prefix in [(str(alias),''),(str(mount),''),*extra_paths]:
+            if value.startswith(base+'/'):return '@CARD@/'+prefix+('/' if prefix else '')+value[len(base)+1:]
         return value
-    if isinstance(value,list):return [portable_paths(v,alias,mount) for v in value]
-    if isinstance(value,dict):return {k:portable_paths(v,alias,mount) for k,v in value.items()}
+    if isinstance(value,list):return [portable_paths(v,alias,mount,extra_paths) for v in value]
+    if isinstance(value,dict):return {k:portable_paths(v,alias,mount,extra_paths) for k,v in value.items()}
     return value
 
 def game_id(game):
@@ -140,14 +140,14 @@ def catalog_games(mount,manifest):
         game.setdefault('name',p.stem);catalog.append(game)
     return catalog
 
-def export_metadata(mount,manifest,alias,root):
+def export_metadata(mount,manifest,alias,root,extra_paths=()):
     # Do not recreate folders at a stale path after unplugging the cartridge.
     if not mount.is_mount():return
     current=read(marker_path(mount))
     if current.get('library_id')!=manifest['library_id']:return
     templates={}
     for p in (root/'games').glob('*/*.json'):
-        if p.name in ['updates.json','dlc.json']:templates[p.relative_to(root/'games').as_posix()]=portable_paths(read(p),alias,mount)
+        if p.name in ['updates.json','dlc.json']:templates[p.relative_to(root/'games').as_posix()]=portable_paths(read(p),alias,mount,extra_paths)
     current.update(game_metadata=templates,games=manifest['games'],schema=2,kind='switch-library');current.pop('card_uuid',None)
     write_changed(marker_path(mount),current)
 

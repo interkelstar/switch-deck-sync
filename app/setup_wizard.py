@@ -40,6 +40,8 @@ class Wizard:
     def choose(self, heading, choices):
         if not choices:
             raise setup.SetupError(heading + ': ' + self.t('nothing found', 'ничего не найдено'))
+        if len(choices) == 1:
+            return choices[0][0]
         args = ['--radiolist', heading]
         for i, (_, label) in enumerate(choices):
             args += [str(i), label, 'on' if i == 0 else 'off']

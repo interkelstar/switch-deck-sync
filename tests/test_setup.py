@@ -46,7 +46,8 @@ class SetupTests(unittest.TestCase):
         (backend / 'emuDeckRyujinx.sh').write_text('# fixture stock backend\n')
         self.settings = self.home / '.config/EmuDeck/settings.sh'
         self.settings.write_text('autoMapSwitch="false"\n')
-        put(self.source / 'Config.json', {'game_dirs': [], 'input_config': [{'gyro': 'host gyro'}]})
+        put(self.source / 'Config.json', {'game_dirs': [], 'input_config': [{'gyro': 'host gyro'}],
+                                         'res_scale': 2, 'docked_mode': True, 'custom': {'proof': 'preserve'}})
         for name in setup.SHARED:
             (self.source / name).mkdir()
         (self.source / 'bis/user/save').mkdir(parents=True)
@@ -182,6 +183,23 @@ class SetupTests(unittest.TestCase):
         self.assertFalse((self.local / 'ryujinx.sh').exists())
         self.assertFalse((self.local / 'ryujinx').exists())
         self.assertNotIn('emulator_executable', card.read(self.local / 'host.json'))
+        config = card.read(self.source / 'Config.json')
+        self.assertEqual(config['res_scale'], 2)
+        self.assertTrue(config['docked_mode'])
+        self.assertEqual(config['custom'], {'proof': 'preserve'})
+        self.assertEqual(self.settings.read_text(), 'autoMapSwitch="false"\n')
+
+    def test_game_can_launch_with_our_python_runtime_files_unavailable(self):
+        self.prepare()
+        self.install()
+        # Mapping is already present. A game must not import/execute our runtime.
+        for path in self.local.glob('*.py'):
+            path.write_text('raise RuntimeError("custom runtime must not be used to launch games")\n')
+        result = subprocess.run([str(self.launcher), '--fullscreen',
+                                 str(self.emu / 'roms/switch/Fixture [0000000000001000].xci')],
+                                capture_output=True, text=True, env=dict(os.environ, PYTHONPATH=''))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Fixture User', card.read(self.source / 'executed.json')['profile'])
 
     def test_stock_automap_disabled_and_enabled_are_both_owned_by_native_launcher(self):
         self.prepare()

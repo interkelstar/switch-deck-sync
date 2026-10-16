@@ -1,9 +1,9 @@
 """Attach card data to stock EmuDeck paths. Never launch an emulator or map inputs."""
-import contextlib
 import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -77,6 +77,16 @@ class DataManager:
 
     def attach(self, mount, manifest, part):
         self.verify_links()
+        shared = card.contained(mount, manifest['data_dir'])
+        if not (shared / 'system/prod.keys').is_file():
+            raise card.LibraryError('На карте отсутствуют ключи Ryujinx.')
+        firmware = shared / 'bis/system/Contents/registered'
+        if not firmware.is_dir() or not any(firmware.iterdir()):
+            raise card.LibraryError('На карте отсутствует установленная прошивка Ryujinx.')
+        for parent, directories, files in os.walk(shared, followlinks=False):
+            for name in directories + files:
+                if (Path(parent) / name).is_symlink():
+                    raise card.LibraryError('В данных профиля карты обнаружена ссылка. Нужны сами файлы данных.')
         cache = self.local / 'libraries' / manifest['library_id'].lower() / 'games'
         cache.mkdir(parents=True, exist_ok=True)
         templates = manifest.get('game_metadata', {})
@@ -94,9 +104,10 @@ class DataManager:
         card.write_changed(app / 'settings.json', settings)
         bundle = self.local / 'targets' / uuid.uuid4().hex
         bundle.mkdir(parents=True, mode=0o700)
-        shared = card.contained(mount, manifest['data_dir'])
+        patches = card.contained(mount, self.patches_path(manifest))
+        patches.mkdir(parents=True, exist_ok=True)
         targets = {name: shared / name for name in ('bis', 'system', 'mods', 'sdcard')}
-        targets.update(card=mount, roms=card.contained(mount, manifest['rom_dir']), games=cache, sync=app)
+        targets.update(card=mount, roms=card.contained(mount, manifest['rom_dir']), games=cache, sync=app, patches=patches)
         for name, target in targets.items():
             (bundle / name).symlink_to(target, target_is_directory=True)
         # This descriptor pins only the LOCAL bundle, not the mounted card. Normal
@@ -127,6 +138,10 @@ class DataManager:
                     pass
 
     @staticmethod
+    def patches_path(manifest):
+        return str(card.relative_path(manifest['data_dir']).parent / 'patchesAndDlc')
+
+    @staticmethod
     def identity(mount, manifest, part):
         return (str(mount), part['path'], part.get('uuid'), manifest['library_id'],
                 manifest['data_dir'], manifest['rom_dir'], manifest['sync_dir'], mount.stat().st_dev)
@@ -141,11 +156,12 @@ class DataManager:
         cache = self.local / 'libraries' / manifest['library_id'].lower() / 'games'
         values = self.metadata_contents(cache)
         if values != self.metadata:
-            card.export_metadata(mount, manifest, self.local / 'active/card', self.root)
+            extra = [(self.host['roms_dir'], manifest['rom_dir']),
+                     (self.host['patches_dir'], self.patches_path(manifest))]
+            card.export_metadata(mount, manifest, self.local / 'active/card', self.root, extra)
             self.metadata = values
 
     def tick(self, devices=None, busy=None, allow_mount=True):
-        busy = active_game() if busy is None else busy
         try:
             self.verify_links()
             mount, manifest, part = card.locate(self.host, allow_mount, devices)
@@ -156,7 +172,8 @@ class DataManager:
                 except (OSError, ValueError):
                     pass  # Ryujinx can be in the middle of replacing a metadata JSON.
                 return
-            if busy:
+            is_busy = active_game() if busy is None else busy
+            if is_busy:
                 self.detach('busy', 'Закрой Ryujinx и синхронизацию перед сменой библиотеки.')
                 return
             self.attach(mount, manifest, part)
@@ -201,11 +218,19 @@ def watch(local=LOCAL):
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, stopping)
     manager.detach()
+    inventory = None
+    last_mounts = None
+    next_scan = 0
     try:
         while not stop:
             try:
                 with card.session_lock(local):
-                    manager.tick()
+                    mounts = Path('/proc/self/mountinfo').read_bytes()
+                    if mounts != last_mounts or time.monotonic() >= next_scan:
+                        inventory = card.block_devices()
+                        last_mounts = mounts
+                        next_scan = time.monotonic() + 5
+                    manager.tick(devices=inventory)
             except card.LibraryError:
                 pass  # The sync application or setup currently owns the data mapping.
             time.sleep(0.5)
@@ -224,7 +249,12 @@ def run_sync(args, local=LOCAL):
         if not (Path(host['ryujinx_dir']) / 'bis').resolve().is_relative_to(mount.resolve()):
             raise card.LibraryError('Подключена другая библиотека. Закрой игры и подожди подключения карты.')
         env = dict(os.environ, SDS_DATA_DIR=str(local / 'active/sync'))
-        child = subprocess.Popen(['/usr/bin/python3', str(local / 'switch_save_sync.py'), *args], env=env)
+        command = ['/usr/bin/python3', str(local / 'switch_save_sync.py'), *args]
+        if shutil.which('systemd-inhibit'):
+            prefix = ['systemd-inhibit', '--no-ask-password', '--what=sleep:idle', '--mode=block']
+            if subprocess.run([*prefix, '/usr/bin/true'], capture_output=True).returncode == 0:
+                command = [*prefix, '--who=Switch Deck Sync', '--why=Save synchronisation', *command]
+        child = subprocess.Popen(command, env=env)
         previous = {sig: signal.signal(sig, lambda s, f: child.send_signal(s))
                     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
         try:

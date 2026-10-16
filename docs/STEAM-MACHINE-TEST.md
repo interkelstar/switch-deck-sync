@@ -1,31 +1,26 @@
 # First Steam Machine acceptance test
 
-Status: **not yet executed on the target machine**.
+Status: not yet completed on target hardware.
 
-Use the built release archive exactly as a new user would. No SSH, source edits,
-private Deck paths, debug ports or external agent setup should be needed. If something
-fails, retain the message and fix the installer before repeating the test.
+1. Install EmuDeck in Custom Mode to Internal Storage with the prepared card removed.
+   Select Ryujinx and Steam ROM Manager; ES-DE is optional.
+2. Open and close Ryujinx from the application menu. AutoMap enabled notice is native
+   EmuDeck behavior; a missing keys warning is expected on the empty host.
+3. Insert the prepared card. Extract the 0.3.0 installer ZIP and open Install.desktop.
+   Choose language/reader; no SSH, source edits, paths or emulator binary selection.
+4. Confirm attachment. Steam reopens with the sync artwork and direct native shortcuts.
+5. Launch Zelda from Game Mode. Confirm familiar save progress and controller input.
+   If AutoMap was disabled, verify the manual setting stays disabled.
+6. Close the game. Open native Ryujinx from the application menu and confirm the
+   same games/profile are visible. ES-DE and SRM use the normal roms/switch location.
+7. Close games, run Switch Deck Sync, and check the existing Switch/profile/game
+   settings are retained. Check one small save change with both sides backed up.
+8. Close games/sync and eject. Return the card to Deck and verify progress carries.
+9. On the Steam Machine, check another prepared card and then an ordinary Steam card.
+   No USB fallback or cross-profile mapping is allowed.
+10. Rerun the installer to check idempotence, then check Restore. Original host
+    configuration/folders must return without changing card saves.
 
-1. Install EmuDeck and a supported native Ryujinx build. Start it once and configure
-   the Steam Machine's controller. Keep the existing setup as the comparison baseline.
-2. Insert the prepared library card. Download/extract the release and open Install.desktop.
-3. Choose English or Russian, the real card reader, native executable and the local
-   Ryujinx data folder. Confirm attachment. Check that Steam returns with the sync
-   cover, hero, logo, landscape image, icon, library shortcut and game shortcuts.
-4. Launch Zelda through its Steam shortcut. Confirm familiar progress and controller
-   input. Do not assume Deck-specific gyro services are present on this host.
-5. Close the game. Run Switch Deck Sync, select the Switch address/profiles/games and
-   perform a comparison with the Switch companion open. First verify matching progress;
-   then test one small, known save change with both sides backed up.
-6. Close everything, eject the card, and return it to Deck. Verify that progress carries
-   over while Deck controls remain unchanged.
-7. Rerun the installer on the Steam Machine. Check that Steam IDs, settings, sync
-   baseline and saves are retained. Try the restore option and verify old shortcuts.
-8. Separately test preparing a fresh ext4 card from an ordinary Ryujinx setup. Check
-   DLC/update paths and create one initial emulator save before selecting that game.
-9. Test another prepared library in the same slot, and then an unrelated Steam card.
-   The helper must not load the previous profile or silently use a USB library.
-
-Record OS version, emulator version/distribution, selected reader type, controller,
-test results and any displayed errors. Exclude keys, saves, IP addresses and account
-identifiers from public issue attachments.
+Automated Linux checks use synthetic games, keys/firmware and launcher fixtures.
+They validate data ownership and direct command routing, not hardware performance
+or the correctness of EmuDeck's own controller-detection implementation.

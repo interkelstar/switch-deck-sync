@@ -1,5 +1,20 @@
 # Changes
 
+## 0.3.0-preview
+
+- Attach portable card data to the original EmuDeck/Ryujinx paths.
+- Direct stock EmuDeck launchers for all game/emulator shortcuts.
+- No custom emulator launcher, alternate root or AutoMap hook.
+- Background user service for reader-based data links only.
+- Preserve all controller/graphics settings and back up original data directories.
+- Automatic path discovery and graphical restore.
+- Fresh Steam Machine hardware acceptance remains pending.
+
+## 0.2.1-preview — withdrawn
+
+- Experimental AutoMap bridge was reverted because native EmuDeck must own startup.
+- Do not install this version.
+
 ## 0.2.0-preview
 
 - One Desktop Mode setup wizard for an existing card or a new portable library.

@@ -13,7 +13,7 @@ Before a public release:
   this repository. The source fixtures use fabricated data.
 
 The CI workflow runs tests on pushes and pull requests. For a release, push a version
-tag such as `v0.2.0-preview`; the release workflow builds both archives and publishes a
+tag such as `v0.3.0-preview`; the release workflow builds both archives and publishes a
 GitHub **prerelease** with checksums. It does not build a stable release automatically.
 GitHub's built-in source ZIP is not the installer artifact; users should download the
 named ZIP or tar.gz from Releases and open Install.desktop after extraction.

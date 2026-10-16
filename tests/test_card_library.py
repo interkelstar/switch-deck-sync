@@ -3,6 +3,9 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
+import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -120,6 +123,21 @@ class NativeCardTests(unittest.TestCase):
         self.assertEqual((self.source / 'games/cache-proof').read_text(), 'first card shaders')
         self.assertIn(str(self.local / 'active/card'), (self.source / 'games/0000000000001000/updates.json').read_text())
 
+    def test_standard_emudeck_dlc_folder_is_card_owned_and_metadata_is_portable(self):
+        self.prepare()
+        self.install()
+        patches = self.emu / 'storage/ryujinx/patchesAndDlc'
+        (patches / 'new pack.nsp').write_bytes(b'fixture DLC')
+        self.assertEqual((self.mount / 'Emulation/storage/ryujinx/patchesAndDlc/new pack.nsp').read_bytes(), b'fixture DLC')
+        p = self.source / 'games/0000000000001000/dlc.json'
+        p.parent.mkdir(parents=True)
+        p.write_text(json.dumps([{'path': str(patches / 'new pack.nsp'), 'nca': '/content.nca'}]))
+        with patch.object(Path, 'is_mount', return_value=True):
+            self.manager.tick(self.devices(), busy=False, allow_mount=False)
+        manifest = card.read(card.marker_path(self.mount))
+        selected = manifest['game_metadata']['0000000000001000/dlc.json'][0]
+        self.assertEqual(selected, {'path': '@CARD@/Emulation/storage/ryujinx/patchesAndDlc/new pack.nsp', 'nca': '/content.nca'})
+
     def test_emudeck_reset_is_detected_without_replacing_native_settings(self):
         self.prepare()
         self.install()
@@ -172,6 +190,34 @@ class NativeCardTests(unittest.TestCase):
         self.start_data(self.local, '')
         self.assertTrue((self.source / 'system/Profiles.json').is_file())
         self.assertFalse((self.source / 'executed.json').exists())
+
+    def test_installed_background_service_attaches_and_stops_without_starting_emulator(self):
+        self.prepare()
+        self.install()
+        self.stop_data()
+        tools = self.base / 'fake tools'
+        tools.mkdir()
+        listing = tools / 'lsblk'
+        listing.write_text('#!/usr/bin/python3\nprint(' + repr(json.dumps({'blockdevices': self.devices()})) + ')\n')
+        listing.chmod(0o755)
+        child = subprocess.Popen([sys.executable, str(self.local / 'native_card.py'), 'watch'],
+                                 env=dict(os.environ, PATH=str(tools) + ':/usr/bin:/bin'),
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            for _ in range(80):
+                if card.read(self.local / 'native-status.json').get('state') == 'ready':
+                    break
+                if child.poll() is not None:
+                    self.fail(child.communicate()[1])
+                time.sleep(0.05)
+            self.assertEqual(card.read(self.local / 'native-status.json')['state'], 'ready')
+            self.assertTrue((self.source / 'system/prod.keys').is_file())
+            self.assertFalse((self.source / 'executed.json').exists())
+        finally:
+            child.terminate()
+            child.communicate(timeout=8)
+        self.assertEqual(child.returncode, 0)
+        self.assertEqual(os.readlink(self.local / 'active'), '/dev/null')
 
 
 if __name__ == '__main__':

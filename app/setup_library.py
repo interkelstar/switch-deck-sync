@@ -469,11 +469,14 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
         tx.replace(root / 'Config.json', json_bytes(config))
         links = {str(root / name): str(active / name) for name in SHARED + ('games',)}
         links[str(roms / 'switch')] = str(active / 'roms')
+        patches = roms.parent / 'storage/ryujinx/patchesAndDlc'
+        links[str(patches)] = str(active / 'patches')
         for path, target in links.items():
             tx.redirect(Path(path), Path(target))
         host = {'schema': 3, 'architecture': 'native-emudeck', 'slot': slot,
                 'ryujinx_dir': str(root), 'native_launcher': str(launcher),
-                'roms_dir': str(roms / 'switch'), 'native_links': links, 'version': VERSION}
+                'roms_dir': str(roms / 'switch'), 'patches_dir': str(patches),
+                'native_links': links, 'version': VERSION}
         tx.replace(local / 'host.json', json_bytes(host))
         script = '#!/bin/sh\nset -eu\nBASE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec /usr/bin/python3 "$BASE/native_card.py" sync "$@"\n'
         tx.replace(local / 'sync.sh', script.encode(), mode=0o755)

@@ -1,76 +1,80 @@
-# Library and host boundary
+# Native EmuDeck data attachment
 
-The host installer creates `~/.local/share/switch-deck-sync/`. Code is installed there;
-no executable code from the removable card is launched. Older libraries may still
-contain a copy of the original client, which the new host ignores.
+## Ownership
 
-```
-host/
-  host.json                    # reader and local emulator paths
-  card -> current mount        # updated at each guarded launch
-  ryujinx/
-    Config.json                # host controls, graphics and game directory
-    bis -> ../card/.../bis
-    system -> ../card/.../system
-    mods -> ../card/.../mods
-    sdcard -> ../card/.../sdcard
-    games -> ../libraries/<library-id>/games
-  libraries/<library-id>/games # cache and host materialised update/DLC selections
-  session.lock                # held throughout emulator/sync lifetime
-  backups/<install-id>/       # private installer undo journal
+Game shortcuts point directly to the existing EmuDeck tools/launchers/ryujinx.sh.
+There is no installed game-launch wrapper, alternate Ryujinx root, per-game Python
+resolver, AutoMap bridge, backend patch or emulator executable call in this project.
+Native EmuDeck/Ryujinx retains startup, updates, controls, gyro and graphics settings.
 
-card/Emulation/
-  switch-library.json
-  roms/switch/
-  storage/ryujinx/
-    data/{bis,system,mods,sdcard}
-    patchesAndDlc/
-  tools/switch-save-sync/
-    settings.json
-    state.json
-    backups/
-    pending.json              # only while recovering a transfer
-```
+The installer detects the host EmuDeck ROM directory from Steam ROM Manager settings
+or narrowly parses EmuDeck's path assignments. It never sources shell settings.
+The base Emulation location must be Internal Storage for this preview.
 
-The manifest supports schema 1 and 2. Its relative `data_dir`, `rom_dir` and `sync_dir`
-must remain inside the card. The legacy root `.switch-library.json` is readable; new
-libraries use `Emulation/switch-library.json`. A content library ID namespaces local
-caches; it is not an allowlist of physical cards. `card_uuid` is ignored.
+## Host and card layout
 
-`lsblk` inventories disks. MMC mode accepts one `mmcblkN` disk. Reader-path mode selects
-the current disk behind an explicit `/dev/disk/by-path/` hardware connection. `udisksctl`
-mounts a selected partition under normal user permissions. No fallback to another drive
-occurs if the configured reader lacks a prepared library.
+The original ~/.config/Ryujinx/Config.json remains the active configuration. Only
+game_dirs changes to EmuDeck's existing roms/switch path. No input, graphics or
+other configuration fields change during attachment.
 
-Ryujinx is invoked with `--root-data-dir <managed-root>`, leaving its original data root
-unchanged. Controls are initially copied from this host's existing `Config.json`, with
-only `game_dirs` replaced. Additional local controller profiles/mappings are copied if
-available. Hardware services such as a DSU gyro server are outside this installer.
+Host data links:
+- ~/.config/Ryujinx/{bis,system,mods,sdcard,games} -> local/active/<name>
+- EmuDeck's Emulation/roms/switch -> local/active/roms
+- EmuDeck's Emulation/storage/ryujinx/patchesAndDlc -> local/active/patches
 
-Before startup, update/DLC JSON uses manifest templates with `@CARD@/` relative paths.
-Selections are exported back to portable templates on emulator exit. CPU/GPU caches
-remain local. Title ID shortcuts resolve against actual files on the inserted card.
-Duplicate base-game IDs are rejected during setup; unknown IDs use the emulator browser.
+local is ~/.local/share/switch-deck-sync/.
+A systemd user service, switch-deck-sync-card.service, maintains active data links.
+The service never launches the emulator, sources EmuDeck functions or changes input.
 
-The sync process receives `SDS_DATA_DIR` for card-owned settings/history/backups. It runs
-from locally installed code. Card settings' machine-specific Ryujinx paths are refreshed
-at launch. Interrupted sync journals must be resolved on the original machine before
-attaching on another host because they may reference in-flight absolute backup paths.
+A local target bundle links card-owned bis/system/mods/sdcard/roms/sync and the
+host-owned libraries/<library-id>/games cache. active is atomically switched to
+/proc/<service-pid>/fd/<bundle-fd>. The descriptor pins the LOCAL target directory,
+not the card mount; normal eject is not held busy. When the service dies, /proc cannot
+create fallback folders behind its dead descriptor. A clean stop/absent card points
+active to /dev/null, also preventing substitute local save creation.
 
-Setup changes to the host and Steam are journalled before replacement. Regular file
-backups, journals, replacements and their directory entries are flushed before commit.
-Ordinary failures trigger rollback; the next wizard run offers recovery after a process
-interruption. Copies to a new card are SHA-256 verified and published with a manifest
-only after all components are ready. Failed card preparation has a resumable intent
-file and staging directory. It never deletes original source data or formats storage.
+The service polls the configured reader every half second. MMC readers are detected
+by transport; USB readers use a stable /dev/disk/by-path connection. UUID is only a
+change signal, never an allowlist. Libraries are validated before attachment, and
+card links escaping the card are rejected. There is no fallback to a different reader.
 
-Steam shortcut changes happen only while Steam is stopped and are backed up. The writer
-preserves supported binary VDF fields and existing shortcut IDs. Unknown VDF types or
-ambiguous matches abort setup. All new shortcuts use installed wrappers, not card paths.
-Artwork for the sync app is installed locally; individual game artwork is retained if
-already present, but not fetched from third-party services.
+Card data remains:
+- Emulation/switch-library.json (schema 1/2 accepted)
+- Emulation/roms/switch/
+- Emulation/storage/ryujinx/data/{bis,system,mods,sdcard}/
+- Emulation/storage/ryujinx/patchesAndDlc/
+- Emulation/tools/switch-save-sync/{settings.json,state.json,backups,...}
 
-The host install does not globally modify EmuDeck or ES-DE. This bounds the first
-release to native Ryujinx / AppImage launched through the installed Steam/desktop
-shortcuts. The earlier helper's ES-DE functions remain in source for existing host
-configurations but the generic installer does not configure that frontend yet.
+Update/DLC selections are materialised in host games caches using the stable
+active/card prefix. Metadata changes are exported to portable @CARD@ templates.
+Partial JSON writes are retried without disconnecting an active game. Physical card
+removal during writes is unsupported; close games/sync and eject normally.
+
+The service never switches to a different profile while Ryujinx/save sync is running.
+A missing/replaced card invalidates attachment instead of mixing data. EmuDeck
+reset changes to the managed data links are detected and require reinstalling this
+attachment, not overriding the native configuration.
+
+## Installation and rollback
+
+Existing real host directories are renamed into durable transaction backups on the
+same filesystem. Links/files are replaced with their originals journalled first.
+Restore removes data links and moves the original directories back; it never copies
+the card saves over the original host data or deletes card content. Crash recovery
+handles directory moves before and after link publication.
+
+Setup exits Steam before editing shortcuts, preserves recognised shortcut IDs/input
+settings, and adds direct native emulator/game shortcuts plus the standalone sync app.
+Existing EmuDeck launcher/backend bytes and global paths remain unchanged. New ROM
+files and renamed files use ordinary Steam ROM Manager refresh.
+
+The installed executable code is local. No code is executed from the card.
+Only native_card.py sync starts this project's separate save-sync application.
+The watch mode starts no emulator process.
+
+## Boundaries
+
+This is a SteamOS/native Ryujinx/ext4/Internal Storage preview. It does not integrate
+Flatpak/portable roots, multiple MMC readers or Windows. Old custom-launcher hosts
+must use their previous restore before installing. Dedicated hardware gyro services
+remain managed by EmuDeck. A fresh Steam Machine hardware acceptance run is pending.
