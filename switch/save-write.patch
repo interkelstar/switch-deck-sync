@@ -1,0 +1,13 @@
+diff --git a/src/platform/nx/vfs/vfs_nx_save.c b/src/platform/nx/vfs/vfs_nx_save.c
+index 4d5aa6c..728646f 100644
+--- a/src/platform/nx/vfs/vfs_nx_save.c
++++ b/src/platform/nx/vfs/vfs_nx_save.c
+@@ -616,7 +616,7 @@ static void build_native_path(char out[FS_MAX_PATH], const char* path, const str
+ static int vfs_save_open(void* user, const char* path, enum FtpVfsOpenMode mode) {
+     struct VfsSaveFile* f = user;
+     f->data = get_type(path);
+-    if (mode != FtpVfsOpenMode_READ && (!g_writable || f->data.type != SaveDirType_ZipApp)) {
++    if (mode != FtpVfsOpenMode_READ && (!g_writable || f->data.type != SaveDirType_FileApp)) {
+         errno = EROFS;
+         return -1;
+     }

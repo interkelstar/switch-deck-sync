@@ -1,0 +1,249 @@
+"""KDE Desktop Mode setup wizard. All dialogs are provided by kdialog."""
+import ctypes.util
+import json
+import locale
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+import card_library as card
+import setup_library as setup
+
+
+class Cancelled(Exception):
+    pass
+
+
+class Wizard:
+    def __init__(self, package):
+        self.package = package
+        self.home = Path.home()
+        self.ru = (os.environ.get('LANG', '') or locale.getlocale()[0] or '').lower().startswith('ru')
+        self.progress_address = None
+        self.dbus = shutil.which('qdbus6') or shutil.which('qdbus')
+
+    def t(self, en, ru):
+        return ru if self.ru else en
+
+    def dialog(self, *args):
+        result = subprocess.run(['kdialog', '--title', 'Switch Deck Sync', *map(str, args)],
+                                capture_output=True, text=True)
+        if result.returncode:
+            raise Cancelled()
+        return result.stdout.strip()
+
+    def choose(self, heading, choices):
+        if not choices:
+            raise setup.SetupError(heading + ': ' + self.t('nothing found', 'ничего не найдено'))
+        args = ['--radiolist', heading]
+        for i, (_, label) in enumerate(choices):
+            args += [str(i), label, 'on' if i == 0 else 'off']
+        return choices[int(self.dialog(*args))][0]
+
+    def file(self, heading, default):
+        return Path(self.dialog('--getopenfilename', default, '*', '--title', heading))
+
+    def directory(self, heading, default):
+        return Path(self.dialog('--getexistingdirectory', default, '--title', heading))
+
+    def progress(self, text):
+        print(text, flush=True)
+        if self.progress_address and self.dbus:
+            subprocess.run([self.dbus, *self.progress_address, 'setLabelText', text], capture_output=True)
+
+    def busy(self):
+        if not self.dbus:
+            return
+        try:
+            value = self.dialog('--progressbar', self.t('Installing and checking files…', 'Установка и проверка файлов…'), '0')
+            self.progress_address = value.split()
+            if self.dbus:
+                subprocess.run([self.dbus, *self.progress_address, 'showCancelButton', 'false'], capture_output=True)
+        except Cancelled:
+            pass
+
+    def end_busy(self):
+        if self.progress_address and self.dbus:
+            subprocess.run([self.dbus, *self.progress_address, 'close'], capture_output=True)
+        self.progress_address = None
+
+    def dependencies(self):
+        missing = [name for name in ('lsblk', 'udisksctl') if not shutil.which(name)]
+        missing += [name for name in ('SDL2', 'SDL2_ttf') if not ctypes.util.find_library(name)]
+        fonts = Path('/usr/share/fonts')
+        if not any(fonts.rglob('DejaVuSans.ttf')):
+            missing.append('DejaVu Sans')
+        if missing:
+            raise setup.SetupError(self.t('Missing dependencies: ', 'Не найдены зависимости: ') + ', '.join(missing))
+
+    def close_steam(self):
+        self.dialog('--msgbox', self.t(
+            'Save and close games and save sync. Steam will now exit briefly so the installer can safely add shortcuts. Your library will reopen afterwards.',
+            'Сохранись и закрой игры и синхронизацию. Steam сейчас ненадолго завершится для безопасного добавления ярлыков. После установки библиотека откроется снова.'))
+        setup.require_idle(steam=False)
+        if shutil.which('steam'):
+            subprocess.run(['steam', '-shutdown'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+        for _ in range(40):
+            try:
+                setup.require_idle()
+                return
+            except setup.SetupError:
+                time.sleep(0.5)
+        raise setup.SetupError(self.t('Steam is still running. Exit it from its menu and retry.', 'Steam всё ещё работает. Заверши его через меню и повтори установку.'))
+
+    def select_card(self):
+        devices = [d for d in card.block_devices() if d.get('type') == 'disk' and
+                   (d.get('tran') == 'mmc' or d.get('rm') or d.get('tran') == 'usb')]
+        # lsblk does not always expose RM in our minimal inventory; USB choice is explicit.
+        choices = []
+        for d in devices:
+            parts = card.partitions(d)
+            mounts = [m for p in parts for m in p.get('mountpoints', []) if m]
+            choices.append((d, d['path'] + ' — ' + str(d.get('size', '')) + ' ' + (d.get('model') or '') + ' — ' +
+                            (', '.join(mounts) or self.t('not mounted', 'не подключена'))))
+        device = self.choose(self.t('Select the card reader to use for Switch libraries', 'Выбери считыватель для карт с библиотеками Switch'), choices)
+        slot = setup.reader_slot(device)
+        if slot['kind'] == 'mmc' and len([d for d in devices if d.get('tran') == 'mmc']) > 1:
+            raise setup.SetupError('Multiple MMC readers are not yet supported by this setup wizard.')
+        parts = [(p, p['path'] + ' — ' + (p.get('fstype') or '?')) for p in card.partitions(device)
+                 if p.get('fstype') not in (None, 'crypto_LUKS', 'swap')]
+        part = self.choose(self.t('Select the library partition', 'Выбери раздел с библиотекой'), parts)
+        if part.get('fstype') != 'ext4':
+            raise setup.SetupError(self.t('This preview requires an ext4 card, as formatted by SteamOS. The installer does not format cards.', 'Для этой версии нужна карта ext4, как после форматирования в SteamOS. Установщик карты не форматирует.'))
+        mounts = [m for m in part.get('mountpoints', []) if m]
+        if not mounts:
+            subprocess.run(['udisksctl', 'mount', '--no-user-interaction', '-b', part['path']], check=True, capture_output=True)
+            part = next(p for d in card.block_devices() for p in card.partitions(d) if p['path'] == part['path'])
+            mounts = [m for m in part.get('mountpoints', []) if m]
+        if len(mounts) != 1:
+            raise setup.SetupError('Cannot determine the mount point / Не удалось определить папку карты')
+        return Path(mounts[0]), slot
+
+    def steam_profile(self):
+        bases = [self.home / '.local/share/Steam', self.home / '.steam/steam']
+        configs = list(dict.fromkeys(p.resolve() for base in bases for p in base.glob('userdata/*/config')
+                                    if p.parent.name.isdigit() and p.parent.name != '0'))
+        if not configs:
+            raise setup.SetupError(self.t('Sign into Steam once before installing.', 'Перед установкой один раз войди в Steam.'))
+        if len(configs) == 1:
+            return configs[0]
+        names = {}
+        for base in bases:
+            login = base / 'config/loginusers.vdf'
+            if not login.is_file():
+                continue
+            for match in re.finditer(r'"(\d{17})"\s*\{([^{}]*)\}', login.read_text(encoding='utf-8')):
+                name = re.search(r'"PersonaName"\s*"((?:\\.|[^"\\])*)"', match[2])
+                if name:
+                    names[str(int(match[1]) - 76561197960265728)] = name[1].replace('\\"', '"').replace('\\\\', '\\')
+        return self.choose(self.t('Steam account for shortcuts', 'Аккаунт Steam для ярлыков'),
+                           [(p, names.get(p.parent.name, p.parent.name)) for p in configs])
+
+    def recover(self):
+        local = self.home / '.local/share/switch-deck-sync'
+        pending = [p.parent for p in (local / 'backups').glob('*/transaction.json')
+                   if card.read(p).get('status') == 'in-progress']
+        if not pending:
+            return
+        self.dialog('--msgbox', self.t('A previous setup was interrupted. Its changes will be rolled back before retrying.', 'Предыдущая установка прервалась. Сначала восстановим прежние настройки.'))
+        self.close_steam()
+        with card.session_lock(local):
+            for folder in sorted(pending, reverse=True):
+                setup.restore(folder)
+
+    def restore_previous(self):
+        local = self.home / '.local/share/switch-deck-sync'
+        info = card.read(local / 'installation.json')
+        folder = Path(info['backup'])
+        self.dialog('--yesno', self.t('Restore settings and Steam shortcuts from before the last installation? Card games and saves will be retained.', 'Восстановить настройки и ярлыки Steam до последней установки? Игры и сейвы на карте сохранятся.'))
+        self.close_steam()
+        try:
+            with card.session_lock(local):
+                setup.restore(folder)
+        finally:
+            if shutil.which('steam'):
+                subprocess.Popen(['steam'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.dialog('--msgbox', self.t('Previous settings restored. Card data was retained.', 'Предыдущие настройки восстановлены. Данные на карте сохранены.'))
+
+    def run(self):
+        self.dependencies()
+        self.ru = self.choose('Language / Язык', [(False, 'English'), (True, 'Русский')])
+        self.dialog('--msgbox', self.t(
+            'Connect an existing Switch library card, or prepare one using your own Ryujinx games, keys and firmware. No formatting or administrator password is needed. This preview supports native Ryujinx and Ryujinx AppImage.',
+            'Подключи готовую карту Switch или подготовь библиотеку из своих игр, ключей и прошивки Ryujinx. Форматирование и пароль администратора не нужны. Эта версия поддерживает обычный Ryujinx и Ryujinx AppImage.'))
+        self.recover()
+        if (self.home / '.local/share/switch-deck-sync/installation.json').is_file():
+            action = self.choose(self.t('Choose an action', 'Выбери действие'),
+                                 [('install', self.t('Install or update', 'Установить или обновить')),
+                                  ('restore', self.t('Restore the previous settings', 'Восстановить прежние настройки'))])
+            if action == 'restore':
+                self.restore_previous()
+                return
+        mount, slot = self.select_card()
+        ready = card.marker_path(mount).is_file()
+        if ready:
+            mode = 'attach'
+            manifest = card.validated_manifest(mount)
+        else:
+            mode = self.choose(self.t('This card has no portable library yet', 'На карте пока нет переносимой библиотеки'),
+                               [('prepare', self.t('Prepare from my Ryujinx installation', 'Подготовить из моей установки Ryujinx'))])
+            manifest = None
+        executables = setup.emulator_executables(self.home)
+        executable = self.choose(self.t('Ryujinx executable', 'Сам эмулятор Ryujinx'),
+                                 [(p, str(p)) for p in executables] + [(None, self.t('Browse…', 'Выбрать файл…'))])
+        if executable is None:
+            executable = self.file(self.t('Select Ryujinx or its AppImage', 'Выбери Ryujinx или его AppImage'), self.home / 'Applications')
+        roots = setup.emulator_roots(self.home)
+        root = self.choose(self.t('Existing Ryujinx data folder (for this computer’s controls)', 'Папка данных Ryujinx (для настроек управления этого компьютера)'),
+                           [(p, str(p)) for p in roots] + [(None, self.t('Browse…', 'Выбрать папку…'))])
+        if root is None:
+            root = self.directory('Ryujinx — Config.json', self.home / '.config')
+        config = card.read(root / 'Config.json')
+        rom_dirs = []
+        if mode == 'prepare':
+            options = list(dict.fromkeys([Path(p) for p in config.get('game_dirs', []) if Path(p).is_dir()] +
+                                         ([mount / 'Emulation/roms/switch'] if (mount / 'Emulation/roms/switch').is_dir() else [])))
+            use_all = self.t('Use all detected game folders', 'Использовать все найденные папки с играми')
+            selected = self.choose(self.t('Games to include', 'Какие игры включить'),
+                                   ([(options, use_all + ': ' + ', '.join(map(str, options)))] if options else []) + [(None, self.t('Browse…', 'Выбрать папку…'))])
+            rom_dirs = selected or [self.directory(self.t('Folder with your Switch games', 'Папка с твоими играми Switch'), mount)]
+        steam_config = self.steam_profile()
+        count = len(card.catalog_games(mount, manifest)) if ready else self.t('from selected folders', 'из выбранных папок')
+        details = self.t('Connect existing card', 'Подключить готовую карту') if ready else self.t('Copy and verify data; originals are retained', 'Скопировать и проверить данные; оригиналы сохраняются')
+        self.dialog('--yesno', self.t('Install with these settings?', 'Установить с этими настройками?') + '\n\n' +
+                    details + '\n' + str(mount) + '\nRyujinx: ' + str(executable) + '\n' +
+                    self.t('Games: ', 'Игры: ') + str(count) + '\n\n' + self.t('A separate local Ryujinx configuration and Steam shortcuts will be created.', 'Будут созданы отдельные локальные настройки Ryujinx и ярлыки Steam.'))
+        self.close_steam()
+        self.busy()
+        try:
+            result = setup.install(self.package, self.home, mount, slot, executable, root, steam_config,
+                                   mode, rom_dirs, self.progress)
+        finally:
+            self.end_busy()
+            if shutil.which('steam'):
+                subprocess.Popen(['steam'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.dialog('--msgbox', self.t(
+            'Installed. In Steam, open Switch Deck Sync and enter your Switch address, then choose both profiles and games. On Switch, run ftpsrv Save Sync from the switch folder in this package. If a game has no Ryujinx save yet, launch it once and create one first.',
+            'Установлено. В Steam открой Switch Deck Sync, укажи адрес Switch, выбери оба профиля и игры. На Switch запусти ftpsrv Save Sync из папки switch в этом архиве. Если сейва Ryujinx ещё нет, сначала запусти игру и создай его.') +
+                    '\n\n' + self.t('Backup: ', 'Резервная копия: ') + result['backup'])
+
+
+def main(package):
+    if sys.platform != 'linux':
+        raise SystemExit('Run this installer on SteamOS / Linux, in Desktop Mode.')
+    if not shutil.which('kdialog'):
+        raise SystemExit('KDE kdialog is required. Run on SteamOS in Desktop Mode.')
+    wizard = Wizard(package)
+    try:
+        wizard.run()
+    except Cancelled:
+        return 0
+    except Exception as ex:
+        wizard.end_busy()
+        subprocess.run(['kdialog', '--title', 'Switch Deck Sync', '--error', str(ex)], check=False)
+        return 1
+    return 0

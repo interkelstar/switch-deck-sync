@@ -1,0 +1,19 @@
+[Login]
+anon = 1
+
+[Network]
+port = 5000
+timeout = 30
+
+[Misc]
+use_localtime = 0
+
+[Log]
+log = 1
+
+[Nx]
+mount_devices = 1
+save_writable = 1
+mount_bis = 0
+led = 0
+skip_ascii_convert = 0

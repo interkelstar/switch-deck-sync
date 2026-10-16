@@ -1,0 +1,26 @@
+name: Linux tests
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit and integration tests
+        env:
+          PYTHONPATH: app
+        run: python -m unittest discover -s tests -v
+      - name: Build and inspect clean release
+        run: python scripts/build_release.py
+      - uses: actions/upload-artifact@v4
+        if: matrix.python == '3.12'
+        with:
+          name: Switch-Deck-Sync-preview
+          path: dist/*

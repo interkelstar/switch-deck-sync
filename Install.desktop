@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Install Switch Deck Sync
+Name[ru]=Установить Switch Deck Sync
+Comment=Connect or prepare a portable Switch library
+Comment[ru]=Подключить или подготовить переносимую библиотеку Switch
+Exec=/usr/bin/python3 -c "import pathlib,runpy,sys,urllib.parse; p=pathlib.Path(urllib.parse.unquote(urllib.parse.urlparse(sys.argv[1]).path)) if sys.argv[1].startswith('file:') else pathlib.Path(sys.argv[1]); runpy.run_path(str(p.resolve().parent/'install.py'),run_name='__main__')" %k
+Icon=applications-games
+Terminal=false
+Categories=Game;Utility;
