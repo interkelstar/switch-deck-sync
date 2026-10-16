@@ -65,6 +65,9 @@ handles directory moves before and after link publication.
 
 Setup exits Steam before editing shortcuts, preserves recognised shortcut IDs/input
 settings, and adds direct native emulator/game shortcuts plus the standalone sync app.
+Setup leaves Steam closed. The completion dialog asks the user to open it through
+the normal application menu, so it cannot inherit the installer's desktop identity
+and cgroup. This also applies after restore or installation errors.
 On fresh hosts, existing EmuDeck launcher/backend bytes and global paths remain unchanged. New ROM
 files and renamed files use ordinary Steam ROM Manager refresh.
 

@@ -466,12 +466,54 @@ class SetupTests(unittest.TestCase):
         with patch.object(wizard, 'dialog', side_effect=reply), patch.object(wizard, 'dependencies'), \
                 patch.object(wizard, 'close_steam'), patch.object(card, 'block_devices', return_value=devices), \
                 patch.object(Path, 'is_mount', return_value=True), patch.object(setup_wizard.shutil, 'which', return_value=None), \
-                patch.object(setup, 'install', side_effect=install_ui):
+                patch.object(setup, 'install', side_effect=install_ui), \
+                patch.object(setup_wizard.subprocess, 'Popen') as spawn:
             wizard.run()
+        spawn.assert_not_called()
         self.assertTrue((self.local / 'host.json').exists())
         self.assertTrue((self.steam / 'shortcuts.vdf').exists())
         self.assertTrue(any(args[0] == '--yesno' for args in dialogs))
         self.assertFalse(any(args[0] == '--inputbox' for args in dialogs))
+        self.assertIn('Open Steam from the application menu', dialogs[-1][1])
+
+    def test_prepared_card_wizard_russian_finishes_without_starting_steam(self):
+        self.prepare()
+        self.steam.mkdir(parents=True)
+        wizard = setup_wizard.Wizard(PACKAGE)
+        wizard.home = self.home
+        wizard.dbus = None
+        dialogs = []
+        def reply(*args):
+            dialogs.append(args)
+            return '1' if args[0] == '--radiolist' and args[1] == 'Language / Язык' else ''
+        original_install = setup.install
+        def install_ui(*args, **kwargs):
+            return original_install(*args, **kwargs, idle_check=lambda: None,
+                                    service_start=self.start_data, service_stop=self.stop_data)
+        with patch.object(wizard, 'dialog', side_effect=reply), patch.object(wizard, 'dependencies'), \
+                patch.object(wizard, 'close_steam'), patch.object(card, 'block_devices', side_effect=self.devices), \
+                patch.object(Path, 'is_mount', return_value=True), \
+                patch.object(setup, 'install', side_effect=install_ui), \
+                patch.object(setup_wizard.subprocess, 'Popen') as spawn:
+            wizard.run()
+        spawn.assert_not_called()
+        self.assertIn('Открой Steam через меню приложений', dialogs[-1][1])
+        self.assertIn('Настройки синхронизации с карты уже готовы', dialogs[-1][1])
+
+    def test_restore_success_and_failure_do_not_start_steam_as_installer_child(self):
+        self.prepare()
+        self.install()
+        wizard = setup_wizard.Wizard(PACKAGE)
+        wizard.home = self.home
+        wizard.ru = False
+        with patch.object(wizard, 'dialog'), patch.object(wizard, 'close_steam'), \
+                patch.object(native_card, 'stop_service', side_effect=self.stop_data), \
+                patch.object(native_card, 'systemctl'), \
+                patch.object(setup_wizard.subprocess, 'Popen') as spawn:
+            with patch.object(setup, 'restore', side_effect=OSError('restore failed')), self.assertRaises(OSError):
+                wizard.restore_previous()
+            wizard.restore_previous()
+        spawn.assert_not_called()
 
     def test_duplicate_base_games_stop_before_touching_host_runtime(self):
         self.prepare()

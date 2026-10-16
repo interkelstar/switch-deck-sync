@@ -85,8 +85,8 @@ class Wizard:
 
     def close_steam(self):
         self.dialog('--msgbox', self.t(
-            'Save and close games and save sync. Steam will now exit briefly so the installer can safely add shortcuts. Your library will reopen afterwards.',
-            'Сохранись и закрой игры и синхронизацию. Steam сейчас ненадолго завершится для безопасного добавления ярлыков. После установки библиотека откроется снова.'))
+            'Save and close your games and Switch Deck Sync. Steam will close to update your library. Open Steam again after setup.',
+            'Сохранись и закрой игры и Switch Deck Sync. Steam закроется для обновления библиотеки. После установки открой Steam снова.'))
         setup.require_idle(steam=False)
         if shutil.which('steam'):
             subprocess.run(['steam', '-shutdown'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
@@ -169,23 +169,19 @@ class Wizard:
         self.dialog('--yesno', self.t('Restore settings and Steam shortcuts from before the last installation? Card games and saves will be retained.', 'Восстановить настройки и ярлыки Steam до последней установки? Игры и сейвы на карте сохранятся.'))
         self.close_steam()
         native_card.stop_service()
-        try:
-            with card.session_lock(local):
-                setup.restore(folder)
-            native_card.systemctl('daemon-reload')
-            if (self.home / '.config/systemd/user' / native_card.UNIT).is_file():
-                native_card.systemctl('restart', native_card.UNIT)
-        finally:
-            if shutil.which('steam'):
-                subprocess.Popen(['steam'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.dialog('--msgbox', self.t('Previous settings restored. Card data was retained.', 'Предыдущие настройки восстановлены. Данные на карте сохранены.'))
+        with card.session_lock(local):
+            setup.restore(folder)
+        native_card.systemctl('daemon-reload')
+        if (self.home / '.config/systemd/user' / native_card.UNIT).is_file():
+            native_card.systemctl('restart', native_card.UNIT)
+        self.dialog('--msgbox', self.t('Previous settings restored. Open Steam from the application menu.', 'Прежние настройки восстановлены. Открой Steam через меню приложений.'))
 
     def run(self):
         self.dependencies()
         self.ru = self.choose('Language / Язык', [(False, 'English'), (True, 'Русский')])
         self.dialog('--msgbox', self.t(
-            'Connect your card to the existing EmuDeck Ryujinx setup. Games keep using the stock EmuDeck launcher and controller settings. No formatting or administrator password is needed.',
-            'Подключи карту к установленному через EmuDeck Ryujinx. Игры будут запускаться обычным способом через EmuDeck с его настройками управления. Форматирование и пароль администратора не нужны.'))
+            'Set up your Switch game library and Wi-Fi save sync on this computer. Connect your memory card to get started.',
+            'Настрой библиотеку игр Switch и обмен сейвами по Wi-Fi на этом компьютере. Для начала подключи карту памяти.'))
         self.recover()
         if (self.home / '.local/share/switch-deck-sync/installation.json').is_file():
             action = self.choose(self.t('Choose an action', 'Выбери действие'),
@@ -219,22 +215,26 @@ class Wizard:
         steam_config = self.steam_profile()
         count = len(card.catalog_games(mount, manifest)) if ready else self.t('from selected folders', 'из выбранных папок')
         details = self.t('Connect existing card', 'Подключить готовую карту') if ready else self.t('Copy and verify data; originals are retained', 'Скопировать и проверить данные; оригиналы сохраняются')
-        self.dialog('--yesno', self.t('Install with these settings?', 'Установить с этими настройками?') + '\n\n' +
-                    details + '\n' + str(mount) + '\nRyujinx: ' + str(executable) + '\n' +
-                    self.t('Games: ', 'Игры: ') + str(count) + '\n\n' + self.t('EmuDeck keeps its launcher, controls and graphics. A background data service and direct Steam shortcuts will be installed. Existing folders will be kept for restore.', 'Запуск, управление и графика останутся у EmuDeck. Добавятся фоновое подключение данных карты и прямые ярлыки Steam. Прежние папки сохранятся для восстановления.'))
+        self.dialog('--yesno', self.t('Install Switch Deck Sync?', 'Установить Switch Deck Sync?') + '\n\n' +
+                    details + '\n' + str(mount) + '\n' + self.t('Games: ', 'Игры: ') + str(count) + '\n\n' +
+                    self.t('Your games and Switch Deck Sync will appear in Steam. A backup will be saved so you can undo setup.',
+                           'В Steam появятся игры и Switch Deck Sync. Для отмены установки будет сохранена резервная копия.'))
         self.close_steam()
         self.busy()
         try:
-            result = setup.install(self.package, self.home, mount, slot, executable, root, steam_config,
-                                   mode, rom_dirs, self.progress)
+            setup.install(self.package, self.home, mount, slot, executable, root, steam_config,
+                          mode, rom_dirs, self.progress)
         finally:
             self.end_busy()
-            if shutil.which('steam'):
-                subprocess.Popen(['steam'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        self.dialog('--msgbox', self.t(
-            'Installed. In Steam, open Switch Deck Sync and enter your Switch address, then choose both profiles and games. On Switch, run ftpsrv Save Sync from the switch folder in this package. If a game has no Ryujinx save yet, launch it once and create one first.',
-            'Установлено. В Steam открой Switch Deck Sync, укажи адрес Switch, выбери оба профиля и игры. На Switch запусти ftpsrv Save Sync из папки switch в этом архиве. Если сейва Ryujinx ещё нет, сначала запусти игру и создай его.') +
-                    '\n\n' + self.t('Backup: ', 'Резервная копия: ') + result['backup'])
+        if ready:
+            message = self.t(
+                'Setup complete. Open Steam from the application menu to play your games or launch Switch Deck Sync. Your card’s sync settings are ready to use.',
+                'Установка завершена. Открой Steam через меню приложений, чтобы играть или запустить Switch Deck Sync. Настройки синхронизации с карты уже готовы к использованию.')
+        else:
+            message = self.t(
+                'Setup complete. Open Steam from the application menu, then launch Switch Deck Sync to choose your Switch address, profiles and games. For Switch setup, see docs/SWITCH.md in this folder.',
+                'Установка завершена. Открой Steam через меню приложений, затем запусти Switch Deck Sync и выбери адрес Switch, профили и игры. Настройка самого Switch описана в docs/SWITCH.md в этой папке.')
+        self.dialog('--msgbox', message)
 
 
 def main(package):

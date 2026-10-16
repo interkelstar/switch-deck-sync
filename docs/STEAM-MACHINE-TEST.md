@@ -6,9 +6,10 @@ Status: not yet completed on target hardware.
    Select Ryujinx and Steam ROM Manager; ES-DE is optional.
 2. Open and close Ryujinx from the application menu. AutoMap enabled notice is native
    EmuDeck behavior; a missing keys warning is expected on the empty host.
-3. Insert the prepared card. Extract the 0.3.1 installer ZIP and open Install.desktop.
+3. Insert the prepared card. Extract the 0.3.2 installer ZIP and open Install.desktop.
    Choose language/reader; no SSH, source edits, paths or emulator binary selection.
-4. Confirm attachment. Steam reopens with the sync artwork and direct native shortcuts.
+4. Confirm attachment. After setup completes, open Steam from its normal application
+   menu icon. Check that games and Switch Deck Sync appear in the library.
 5. Launch Zelda from Game Mode. Confirm familiar save progress and controller input.
    If AutoMap was disabled, verify the manual setting stays disabled.
 6. Close the game. Open native Ryujinx from the application menu and confirm the
