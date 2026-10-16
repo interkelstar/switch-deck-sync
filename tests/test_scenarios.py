@@ -12,7 +12,6 @@ import card_library as card
 import native_card
 import setup_library as setup
 import setup_wizard
-import srm_artwork
 import steam_shortcuts as steam
 import sync_launcher
 import test_setup as fixtures
@@ -136,48 +135,3 @@ class StandaloneTests(ScenarioTests):
             wizard.run()
         self.assertEqual(card.read(self.local / 'installation.json')['architecture'], 'sync-only')
         self.assertIn('Wi-Fi', dialogs[1][1])
-
-
-class ArtworkTests(ScenarioTests):
-    def export(self, image=b'first artwork'):
-        source = self.base / ('export-' + str(len(list(self.base.glob('export-*')))))
-        source.mkdir()
-        (source / 'art.tall.png').write_bytes(image)
-        put(source / '_selections.json', [{'title': 'Fixture', 'images': {
-            'tall': {'pool': 'Fixture', 'filename': 'art.tall.png'}, 'long': None}}])
-        return source
-
-    def test_native_export_bytes_survive_card_copy_and_earlier_export_is_retained(self):
-        self.prepare()
-        source = self.export()
-        (source / 'unrelated.keys').write_text('must never be copied')
-        target = srm_artwork.save_export(source, self.mount, setup.copy_verified)
-        self.assertEqual((target / '_selections.json').read_bytes(), (source / '_selections.json').read_bytes())
-        self.assertEqual(sorted(p.name for p in target.iterdir()), ['_selections.json', 'art.tall.png'])
-        newer = self.export(b'new artwork')
-        srm_artwork.save_export(newer, self.mount, setup.copy_verified)
-        old = next(target.parent.glob('srm-image-choices-before-*'))
-        self.assertEqual((old / 'art.tall.png').read_bytes(), b'first artwork')
-        self.assertEqual((target / 'art.tall.png').read_bytes(), b'new artwork')
-        self.assertEqual((source / 'art.tall.png').read_bytes(), b'first artwork')
-
-    def test_malformed_or_escaping_export_leaves_existing_card_artwork_unchanged(self):
-        self.prepare()
-        target = srm_artwork.save_export(self.export(), self.mount, setup.copy_verified)
-        source = self.export()
-        put(source / '_selections.json', [{'title': 'Fixture', 'images': {'tall': {'pool': 'Fixture', 'filename': '../outside.png'}}}])
-        with self.assertRaises(card.LibraryError):
-            srm_artwork.save_export(source, self.mount, setup.copy_verified)
-        self.assertEqual((target / 'art.tall.png').read_bytes(), b'first artwork')
-
-    def test_linked_image_and_interrupted_copy_never_replace_existing_export(self):
-        self.prepare()
-        target = srm_artwork.save_export(self.export(), self.mount, setup.copy_verified)
-        source = self.export()
-        (source / 'art.tall.png').unlink()
-        (source / 'art.tall.png').symlink_to(target / 'art.tall.png')
-        with self.assertRaises(ValueError):
-            srm_artwork.save_export(source, self.mount, setup.copy_verified)
-        with self.assertRaises(OSError):
-            srm_artwork.save_export(self.export(), self.mount, lambda *args: (_ for _ in ()).throw(OSError('interrupted')))
-        self.assertEqual((target / 'art.tall.png').read_bytes(), b'first artwork')

@@ -115,12 +115,3 @@ Existing shortcut IDs, artwork and controller associations survive. The old help
 directory is renamed into the same durable rollback transaction, so it is no longer
 available to execute. Restore returns the directory and every changed entry point.
 Card games/saves/profile and sync history are never moved by this migration.
-
-## SRM artwork exports
-
-The artwork action retains SRM's native _selections.json/selections.json and referenced
-images, byte-for-byte. It copies only validated relative image references into
-Emulation/artwork/srm-image-choices, verifies content hashes and publishes the completed
-folder by rename. Previous exports and the source are retained. No Steam grid files,
-parser preferences or game shortcuts are changed by this action. Exporting directly
-to the parent folder and importing the resulting package are performed by SRM itself.

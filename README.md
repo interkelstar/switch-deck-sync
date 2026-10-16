@@ -6,11 +6,11 @@ Linux computer. A separate memory card is optional.
 
 ![Switch Deck Sync](art/grid.png)
 
-**Preview 0.4.0.** Installer: English and Russian. Save-sync interface: Russian.
+**Preview 0.4.1.** Installer: English and Russian. Save-sync interface: Russian.
 
 ## Install save sync
 
-1. Close your games and Ryujinx. Download **Switch-Deck-Sync-0.4.0-preview.zip** from
+1. Close your games and Ryujinx. Download **Switch-Deck-Sync-0.4.1-preview.zip** from
    a release's **Assets** and extract the whole ZIP to Downloads.
 2. In Desktop Mode, open **Install.desktop**. If KDE asks, choose **Trust / Execute**.
 3. Choose your language, then **Sync saves with Switch**. Setup detects your Ryujinx
@@ -57,15 +57,6 @@ a USB reader in the same USB port. To move to a larger ext4 card, copy the compl
 Add games, emulators or ES-DE to Steam using **Steam ROM Manager**. Switch Deck Sync
 adds only its own application shortcut and keeps existing game shortcuts in place.
 
-## Optional: carry SRM artwork
-
-Use **Transfer SRM artwork** in the installer. You can copy an existing SRM export
-to your card, or follow the displayed paths to export directly through SRM.
-
-The card folder is **Emulation/artwork/srm-image-choices**. On another computer,
-generate the app list in SRM, choose **Import image choices**, review the result,
-and save the selected games to Steam. See [artwork transfer](docs/ARTWORK.md).
-
 ## Requirements and restore
 
 The desktop installer supports Linux with Python 3.10+, KDE kdialog, SDL2/SDL2_ttf
@@ -74,7 +65,7 @@ Steam, launch Switch Deck Sync from the application menu. Portable libraries als
 require systemd user services, lsblk and udisksctl. Windows and multiple MMC readers
 are outside this preview. Use your own dumped games, keys and firmware.
 
-Run **Install.desktop** again to update, manage artwork or **Restore the previous
+Run **Install.desktop** again to update or **Restore the previous
 settings**. Restoration retains saves, card contents and local sync history.
 Installer backups are kept in `~/.local/share/switch-deck-sync/backups/`.
 
@@ -94,8 +85,7 @@ ftpsrv Save Sync; на обоих устройствах закрой игры.
 
 **Переносимая библиотека на карте памяти** — дополнительный сценарий для нескольких
 компьютеров со SteamOS. Игры, сейвы и настройки обмена путешествуют на карте.
-Игровые ярлыки и оформление добавляются через SRM. Для переноса обложек используй
-**Перенести обложки SRM**: мастер сохраняет штатный экспорт SRM на карту.
+Игровые ярлыки и оформление на каждом компьютере добавляются через Steam ROM Manager.
 
 ## Development
 

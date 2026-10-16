@@ -13,7 +13,6 @@ import time
 import card_library as card
 import setup_library as setup
 import native_card
-import srm_artwork
 
 
 class Cancelled(Exception):
@@ -190,30 +189,6 @@ class Wizard:
             native_card.systemctl('restart', native_card.UNIT)
         self.dialog('--msgbox', self.t('Previous settings restored. Open Steam from the application menu.', 'Прежние настройки восстановлены. Открой Steam через меню приложений.'))
 
-    def artwork(self):
-        self.dependencies(portable=True)
-        mount, _ = self.select_card()
-        target = srm_artwork.destination(mount)
-        action = self.choose(self.t('Steam ROM Manager artwork', 'Обложки Steam ROM Manager'), [
-            ('help', self.t('Export or import with SRM', 'Экспортировать или импортировать через SRM')),
-            ('copy', self.t('Copy an existing SRM export to this card', 'Скопировать готовый экспорт SRM на карту'))])
-        if action == 'copy':
-            source = self.directory(self.t('Choose the SRM image-choices export folder', 'Выбери папку экспорта обложек SRM'), self.home / 'Downloads')
-            srm_artwork.export_files(source)
-            self.dialog('--yesno', self.t('Save this SRM export on the card?', 'Сохранить этот экспорт SRM на карте?') + '\n\n' + str(source) + '\n→ ' + str(target))
-            setup.require_idle(steam=False)
-            self.busy()
-            try:
-                srm_artwork.save_export(source, mount, setup.copy_verified, self.progress)
-            finally:
-                self.end_busy()
-        target.parent.mkdir(parents=True, exist_ok=True)
-        self.dialog('--msgbox', self.t(
-            'In Steam ROM Manager, generate the app list.\n\nTo export: choose Export image choices and select this folder:\n',
-            'В Steam ROM Manager создай список игр.\n\nДля экспорта выбери Export image choices и эту папку:\n') + str(target.parent) + '\n\n' +
-            self.t('To import on another computer: choose Import image choices and select:\n',
-                   'Для импорта на другом компьютере выбери Import image choices и папку:\n') + str(target))
-
     def sync_only(self, info):
         roots = setup.emulator_roots(self.home)
         settings = self.home / '.local/share/switch-deck-sync/data/settings.json'
@@ -252,15 +227,12 @@ class Wizard:
         if info:
             portable = info.get('architecture') == 'native-emudeck'
             update = self.t('Update save sync — portable library enabled', 'Обновить синхронизацию — используется переносимая библиотека') if portable else self.t('Update save sync', 'Обновить синхронизацию')
-            choices = [('install', update), ('more', self.t('Other actions…', 'Другие действия…'))]
+            choices = [('install', update)]
+            if not portable:
+                choices.append(('portable', self.t('Set up a portable card library', 'Настроить переносимую библиотеку на карте')))
+            choices.append(('restore', self.t('Restore the previous settings', 'Восстановить прежние настройки')))
             action = self.choose(self.t('Choose an action', 'Выбери действие'),
                                  choices)
-            if action == 'more':
-                choices = [('artwork', self.t('Transfer SRM artwork', 'Перенести обложки SRM')),
-                           ('restore', self.t('Restore the previous settings', 'Восстановить прежние настройки'))]
-                if not portable:
-                    choices.append(('portable', self.t('Set up a portable card library', 'Настроить переносимую библиотеку на карте')))
-                action = self.choose(self.t('Other actions', 'Другие действия'), choices)
             if action == 'restore':
                 self.restore_previous()
                 return
@@ -269,11 +241,7 @@ class Wizard:
             action = 'install'
             operation = self.choose(self.t('What would you like to set up?', 'Что настроить?'), [
                 ('sync', self.t('Sync saves with Switch', 'Обмен сейвами со Switch')),
-                ('portable', self.t('Portable library on a memory card', 'Переносимую библиотеку на карте памяти')),
-                ('artwork', self.t('Other actions: transfer SRM artwork', 'Другие действия: перенести обложки SRM'))])
-        if action == 'artwork' or operation == 'artwork':
-            self.artwork()
-            return
+                ('portable', self.t('Portable library on a memory card', 'Переносимую библиотеку на карте памяти'))])
         if operation == 'sync':
             self.sync_only(info)
             return
@@ -322,10 +290,6 @@ class Wizard:
                 'Setup complete. Open Steam from the application menu, then launch Switch Deck Sync to choose your Switch address, profiles and games. For Switch setup, see docs/SWITCH.md in this folder.',
                 'Установка завершена. Открой Steam через меню приложений, затем запусти Switch Deck Sync и выбери адрес Switch, профили и игры. Настройка самого Switch описана в docs/SWITCH.md в этой папке.')
         self.dialog('--msgbox', message)
-        exported = srm_artwork.destination(mount)
-        if any((exported / name).is_file() for name in srm_artwork.MANIFESTS):
-            self.dialog('--msgbox', self.t('This card has SRM artwork. In Steam ROM Manager, generate your app list, choose Import image choices and select:\n',
-                                           'На карте есть обложки SRM. Создай список игр в Steam ROM Manager, выбери Import image choices и папку:\n') + str(exported))
 
 
 def main(package):
