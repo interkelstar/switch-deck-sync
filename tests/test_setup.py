@@ -78,15 +78,6 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(card.read(self.local / 'ryujinx/system/Profiles.json')['profiles'][0]['name'], 'Fixture User')
         self.assertEqual(card.read(self.source / 'system/Profiles.json')['profiles'][0]['name'], 'Different Host User')
 
-    def test_emudeck_install_enables_native_automap_bridge(self):
-        self.prepare()
-        backend = self.home / '.config/EmuDeck/backend'
-        (backend / 'functions').mkdir(parents=True)
-        (backend / 'functions/all.sh').write_text('Ryujinx_set_gamepad_name() { return 0; }\n')
-        self.install()
-        self.assertEqual(card.read(self.local / 'host.json')['emudeck_backend'], str(backend))
-        self.assertTrue((self.local / 'emudeck_controls.sh').is_file())
-
     def test_repeat_install_preserves_state_saves_and_steam_ids(self):
         manifest = self.prepare()
         sync = self.mount / manifest['sync_dir']

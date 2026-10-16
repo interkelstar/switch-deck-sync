@@ -1,13 +1,5 @@
 # Changes
 
-## 0.2.1-preview
-
-- Reuse installed EmuDeck Ryujinx AutoMap on every portable-library game launch.
-- Apply only controller changes to the managed host configuration and retain SDL filters.
-- Keep native EmuDeck profile and card data outside the controller hook's targets.
-- Document the first-time prepared-card installation without SSH or manual path edits.
-- Steam Machine hardware acceptance is still pending.
-
 ## 0.2.0-preview
 
 - One Desktop Mode setup wizard for an existing card or a new portable library.

@@ -12,10 +12,10 @@ import uuid
 import card_library as card
 import steam_shortcuts
 
-VERSION = '0.2.1-preview'
+VERSION = '0.2.0-preview'
 SHARED = ('bis', 'system', 'mods', 'sdcard')
 RUNTIME = ('card_library.py', 'switch_save_sync.py', 'sync_config.py', 'sync_ui.py',
-           'setup_library.py', 'setup_wizard.py', 'steam_shortcuts.py', 'emudeck_controls.sh')
+           'setup_library.py', 'setup_wizard.py', 'steam_shortcuts.py')
 
 
 class SetupError(Exception):
@@ -383,9 +383,6 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
         host = {'schema': 2, 'slot': slot, 'ryujinx_dir': str(root),
                 'emulator_executable': str(executable), 'root_data_argument': True,
                 'sync_runtime': str(local), 'version': VERSION}
-        backend = home / '.config/EmuDeck/backend'
-        if (backend / 'functions/all.sh').is_file():
-            host['emudeck_backend'] = str(backend)
         tx.replace(local / 'host.json', json_bytes(host))
         for name, command in [('ryujinx.sh', 'emulator'), ('sync.sh', 'sync')]:
             # Runtime-relative shell entry; paths containing spaces and quotes work.

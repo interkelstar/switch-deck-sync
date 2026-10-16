@@ -251,9 +251,6 @@ def main(argv=None):
             if host.get('root_data_argument'):command+=['--root-data-dir',host['ryujinx_dir']]
             command+=arguments(args,manifest,alias)
             if shutil.which('gamemoderun'):command.insert(0,'gamemoderun')
-            if host.get('emudeck_backend'):
-                command=['/bin/bash',str(LOCAL/'emudeck_controls.sh'),
-                         str(Path(host['ryujinx_dir'])/'Config.json'),host['emudeck_backend']]+command
         elif mode=='sync':
             # Executable code is installed locally; the card carries only user data.
             runtime=Path(host.get('sync_runtime',LOCAL))

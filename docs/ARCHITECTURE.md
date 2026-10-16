@@ -47,16 +47,6 @@ unchanged. Controls are initially copied from this host's existing `Config.json`
 only `game_dirs` replaced. Additional local controller profiles/mappings are copied if
 available. Hardware services such as a DSU gyro server are outside this installer.
 
-When the installed EmuDeck backend is detected, `emudeck_controls.sh` sources its
-functions and calls `Ryujinx_set_gamepad_name` against a private temporary copy of the
-managed configuration. Only `input_config` is merged back into the host configuration.
-SDL device filters exported by the hook are inherited by the emulator. The card, the
-original EmuDeck configuration and managed game/graphics paths are not hook targets.
-EmuDeck's full launcher, automatic downloads, save-link setup, cloud sync and SDL
-migrations are not invoked. A missing controller leaves existing host mappings intact;
-a missing/incompatible backend or invalid hook result stops the launch. Backend logs
-are temporary and private because sourcing EmuDeck settings can expose credentials.
-
 Before startup, update/DLC JSON uses manifest templates with `@CARD@/` relative paths.
 Selections are exported back to portable templates on emulator exit. CPU/GPU caches
 remain local. Title ID shortcuts resolve against actual files on the inserted card.

@@ -13,7 +13,6 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = ['install.py', 'install.sh', 'Install.desktop', 'README.md', 'LICENSE', 'VERSION',
          'app/card_library.py', 'app/switch_save_sync.py', 'app/sync_config.py', 'app/sync_ui.py',
          'app/setup_library.py', 'app/setup_wizard.py', 'app/steam_shortcuts.py',
-         'app/emudeck_controls.sh',
          'docs/ARCHITECTURE.md', 'docs/SWITCH.md', 'docs/STEAM-MACHINE-TEST.md',
          'switch/ftpsrv-save-sync.nro', 'switch/source.zip', 'switch/save-write.patch',
          'switch/config.ini.example', 'switch/THIRD-PARTY-NOTICES.txt']
