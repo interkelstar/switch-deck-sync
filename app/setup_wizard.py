@@ -169,70 +169,174 @@ class Wizard:
             for folder in sorted(pending, reverse=True):
                 setup.restore(folder)
         if had_unit:
-   …14848 tokens truncated…0дрес пока не указан'
-                text('Switch: '+address+((':'+str(settings['port'])) if settings.get('host') else ''),66,278)
-                text('Профили: '+settings.get('switch_profile_name','не выбран')+'  ↔  '+settings.get('deck_profile_name','не выбран'),66,326)
-                text('Выбрано игр: '+str(len(settings['games'])),66,374)
-                text('Закрой игры на обоих устройствах. На Switch открой ftpsrv Save Sync.',66,462,26,(166,185,203))
-                if (core.HOME/'pending.json').exists():text('Есть прерванная передача — повтори синхронизацию.',66,546,22,(250,174,117))
-                buttons=[(66,646,410,76,'Синхронизировать'),(506,646,350,76,'Настройки'),(886,646,328,76,'Выход')]
-            elif phase=='settings':
-                labels=[('Адрес Switch',settings.get('host','')+':'+str(settings['port'])),('Папка Ryujinx',settings['ryujinx_dir']),('Профиль Switch',settings.get('switch_profile_name','Выбрать')),('Профиль Ryujinx',settings.get('deck_profile_name','Выбрать')),('Игры',str(len(settings['games']))+' выбрано')]
-                for i,(label,value) in enumerate(labels):buttons.append((66,184+i*85,1148,70,label+'   ·   '+value))
-                buttons.append((864,646,350,76,'Назад'))
-            elif phase in ['working','loading']:
-                text('Синхронизация' if phase=='working' else 'Поиск',66,224,32)
-                text(status,66,294,26)
-                fill((66,395,1148,12),(43,53,68));pos=int((sdl.SDL_GetTicks()%2400)/2400*900)
-                fill((66+pos,395,240,12),(52,202,221))
-                text('Оставь ftpsrv Save Sync открытым на Switch.',66,475,26,(168,183,202))
-                text('Перед заменой сохраняются резервные копии.',66,520,22,(145,164,187))
-            elif phase=='done':
-                text('Проверка завершена',66,188,32,(114,220,169))
-                y=245
-                for result in results[:5]:text(result,66,y,22);y+=66
-                if len(results)>5:text('Ещё '+str(len(results)-5)+' игр. Полный итог сохранён в журнале.',66,580,22)
-                else:text('Можно закрыть ftpsrv и запускать игру.',66,582,26,(168,183,202))
-                buttons=[(864,646,350,76,'Готово')]
-            elif phase=='conflict':
-                text('Нужно выбрать копию',66,210,32,(245,193,104));text(status,66,270,26)
-                text('Выбери прогресс для обоих устройств. Обе версии уже сохранены в резерве. Даты файлов не определяют выбор.',66,330,26)
-                buttons=[(66,630,350,82,'Взять Switch'),(465,630,350,82,'Взять Ryujinx'),(864,630,350,82,'Пропустить')]
-            elif phase=='error':
-                text('Не удалось завершить',66,200,32,(245,158,137));text(error,66,270,26)
-                buttons=[(465,646,350,76,'Настройки'),(864,646,350,76,'На главный')]
-            elif phase=='edit':
-                text('Адрес Switch' if edit_kind=='server' else 'Папка данных Ryujinx',66,180,32)
-                text('Steam + X — клавиатура. B — отменить.',66,236,22,(168,183,202))
-                fill((66,295,1148,90),(34,48,64));text(entry+'|',84,312,26,width=1100)
-                text(error,66,408,22,(245,193,104))
-                buttons=[(465,646,350,76,'Сохранить'),(864,646,350,76,'Отмена')]
-            elif phase=='pick':
-                title={'switch':'Выбери профиль Switch','deck':'Выбери профиль Ryujinx','games':'Игры для синхронизации'}[pick_kind]
-                text(title,66,160,32)
-                if pick_kind=='games':text('Все сейвы Switch. Для синхронизации нужен сейв и в Ryujinx.',66,204,22,(147,174,195))
-                if not choices:text('Общих сохранений пока нет. Запусти игру и создай сейв на обоих устройствах.',66,270,26)
-                for i,item in enumerate(choices[page*4:page*4+4]):
-                    mark=('[✓] ' if item['key'] in selected else '[  ] ') if pick_kind=='games' else ''
-                    if pick_kind=='games' and not item['available']:mark='Нет сейва Ryujinx · '
-                    buttons.append((66,247+i*78,1148,65,mark+item['name']))
-                text(error or ('Страница '+str(page+1)+' / '+str(max(1,(len(choices)+3)//4))),66,584,22,(245,193,104) if error else (147,174,195))
-                buttons.extend([(66,646,250,76,'← Назад'),(346,646,250,76,'Вперёд →'),(626,646,285,76,'Применить'),(941,646,273,76,'Отмена')])
-            selection=min(selection,max(0,len(buttons)-1))
-            for i,(x,y,w,h,label) in enumerate(buttons):
-                fill((x,y,w,h),(34,112,140) if i==selection else (30,44,61))
-                width=I();height=I();original=label
-                while label:
-                    ttf.TTF_SizeUTF8(fonts[22],label.encode(),C.byref(width),C.byref(height))
-                    if width.value<=w-40:break
-                    original=original[:-1];label=original+'…'
-                text(label,x+20,y+18,22,width=w-35)
-            if buttons:text('A — выбрать     B — назад     Крестовина — перемещение',66,756,22,(145,164,187))
-            sdl.SDL_RenderPresent(renderer)
-    finally:
-        sdl.SDL_StopTextInput()
-        for texture,_,_ in cache.values():sdl.SDL_DestroyTexture(texture)
-        for font in fonts.values():ttf.TTF_CloseFont(font)
-        for controller in controllers:sdl.SDL_GameControllerClose(controller)
-        sdl.SDL_DestroyRenderer(renderer);sdl.SDL_DestroyWindow(window);ttf.TTF_Quit();sdl.SDL_Quit()
+            native_card.systemctl('daemon-reload')
+        if (self.home / '.config/systemd/user' / native_card.UNIT).is_file():
+            native_card.systemctl('restart', native_card.UNIT)
+
+    def restore_previous(self):
+        local = self.home / '.local/share/switch-deck-sync'
+        info = card.read(local / 'installation.json')
+        folder = Path(info['backup'])
+        self.dialog('--yesno', self.t('Restore settings and Steam shortcuts from before the last installation? Card games and saves will be retained.', 'Восстановить настройки и ярлыки Steam до последней установки? Игры и сейвы на карте сохранятся.'))
+        self.close_steam()
+        had_unit = (self.home / '.config/systemd/user' / native_card.UNIT).is_file()
+        if had_unit:
+            native_card.stop_service()
+        with card.session_lock(local):
+            setup.restore(folder)
+        if had_unit:
+            native_card.systemctl('daemon-reload')
+        if (self.home / '.config/systemd/user' / native_card.UNIT).is_file():
+            native_card.systemctl('restart', native_card.UNIT)
+        self.dialog('--msgbox', self.t('Previous settings restored. Open Steam from the application menu.', 'Прежние настройки восстановлены. Открой Steam через меню приложений.'))
+
+    def artwork(self):
+        self.dependencies(portable=True)
+        mount, _ = self.select_card()
+        target = srm_artwork.destination(mount)
+        action = self.choose(self.t('Steam ROM Manager artwork', 'Обложки Steam ROM Manager'), [
+            ('help', self.t('Export or import with SRM', 'Экспортировать или импортировать через SRM')),
+            ('copy', self.t('Copy an existing SRM export to this card', 'Скопировать готовый экспорт SRM на карту'))])
+        if action == 'copy':
+            source = self.directory(self.t('Choose the SRM image-choices export folder', 'Выбери папку экспорта обложек SRM'), self.home / 'Downloads')
+            srm_artwork.export_files(source)
+            self.dialog('--yesno', self.t('Save this SRM export on the card?', 'Сохранить этот экспорт SRM на карте?') + '\n\n' + str(source) + '\n→ ' + str(target))
+            setup.require_idle(steam=False)
+            self.busy()
+            try:
+                srm_artwork.save_export(source, mount, setup.copy_verified, self.progress)
+            finally:
+                self.end_busy()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self.dialog('--msgbox', self.t(
+            'In Steam ROM Manager, generate the app list.\n\nTo export: choose Export image choices and select this folder:\n',
+            'В Steam ROM Manager создай список игр.\n\nДля экспорта выбери Export image choices и эту папку:\n') + str(target.parent) + '\n\n' +
+            self.t('To import on another computer: choose Import image choices and select:\n',
+                   'Для импорта на другом компьютере выбери Import image choices и папку:\n') + str(target))
+
+    def sync_only(self, info):
+        roots = setup.emulator_roots(self.home)
+        settings = self.home / '.local/share/switch-deck-sync/data/settings.json'
+        previous_root = card.read(settings).get('ryujinx_dir') if settings.is_file() else (info or {}).get('source_root')
+        if previous_root and Path(previous_root).is_dir():
+            root = Path(previous_root)
+        elif len(roots) == 1:
+            root = roots[0]
+        else:
+            root = self.choose(self.t('Choose your Ryujinx data folder', 'Выбери папку данных Ryujinx'),
+                               [(path, str(path)) for path in roots] + [(None, self.t('Browse…', 'Выбрать папку…'))])
+            if root is None:
+                root = self.directory(self.t('Ryujinx data folder (contains Config.json and bis)', 'Папка данных Ryujinx (с Config.json и bis)'), self.home / '.config/Ryujinx')
+        steam_config = self.steam_profile(required=False)
+        self.dialog('--yesno', self.t('Set up Wi-Fi save sync with your Switch?', 'Настроить обмен сейвами со Switch по Wi-Fi?') + '\n\n' + str(root))
+        if steam_config:
+            self.close_steam()
+        self.busy()
+        try:
+            setup.install_sync_only(self.package, self.home, root, steam_config)
+        finally:
+            self.end_busy()
+        self.dialog('--msgbox', self.t(
+            'Setup complete. Open Switch Deck Sync in Steam or the application menu. In Settings, enter your Switch address and choose the profiles and games. For Switch setup, see docs/SWITCH.md in this folder.',
+            'Установка завершена. Открой Switch Deck Sync в Steam или меню приложений. В настройках укажи адрес Switch, выбери профили и игры. Настройка самого Switch описана в docs/SWITCH.md в этой папке.'))
+
+    def run(self):
+        self.dependencies()
+        self.ru = self.choose('Language / Язык', [(False, 'English'), (True, 'Русский')])
+        self.dialog('--msgbox', self.t(
+            'Sync your Ryujinx saves with your Switch over Wi-Fi.',
+            'Обменивайся сейвами между Ryujinx и Switch по Wi-Fi.'))
+        self.recover()
+        installation = self.home / '.local/share/switch-deck-sync/installation.json'
+        info = card.read(installation) if installation.is_file() else None
+        if info:
+            choices = [('install', self.t('Update current installation', 'Обновить текущую установку')),
+                       ('artwork', self.t('Transfer SRM artwork', 'Перенести обложки SRM')),
+                       ('restore', self.t('Restore the previous settings', 'Восстановить прежние настройки'))]
+            if info.get('architecture') == 'sync-only':
+                choices.append(('portable', self.t('Set up a portable card library', 'Настроить переносимую библиотеку на карте')))
+            action = self.choose(self.t('Choose an action', 'Выбери действие'),
+                                 choices)
+            if action == 'restore':
+                self.restore_previous()
+                return
+            operation = 'portable' if action == 'portable' or info.get('architecture') == 'native-emudeck' else 'sync'
+        else:
+            action = 'install'
+            operation = self.choose(self.t('What would you like to set up?', 'Что настроить?'), [
+                ('sync', self.t('Sync saves with Switch', 'Обмен сейвами со Switch')),
+                ('portable', self.t('Portable library on a memory card', 'Переносимую библиотеку на карте памяти')),
+                ('artwork', self.t('Transfer SRM artwork', 'Перенести обложки SRM'))])
+        if action == 'artwork' or operation == 'artwork':
+            self.artwork()
+            return
+        if operation == 'sync':
+            self.sync_only(info)
+            return
+        self.dependencies(portable=True)
+        mount, slot = self.select_card()
+        ready = card.marker_path(mount).is_file()
+        if ready:
+            mode = 'attach'
+            manifest = card.validated_manifest(mount)
+        else:
+            mode = self.choose(self.t('This card has no portable library yet', 'На карте пока нет переносимой библиотеки'),
+                               [('prepare', self.t('Prepare from my Ryujinx installation', 'Подготовить из моей установки Ryujinx'))])
+            manifest = None
+        roms, executable = setup.native_paths(self.home)
+        root = self.home / '.config/Ryujinx'
+        if not (root / 'Config.json').is_file():
+            raise setup.SetupError(self.t('Start and close Ryujinx once from the application menu, then retry.', 'Один раз открой и закрой Ryujinx через меню приложений, затем повтори установку.'))
+        config = card.read(root / 'Config.json')
+        rom_dirs = []
+        if mode == 'prepare':
+            options = list(dict.fromkeys([Path(p) for p in config.get('game_dirs', []) if Path(p).is_dir()] +
+                                         ([mount / 'Emulation/roms/switch'] if (mount / 'Emulation/roms/switch').is_dir() else [])))
+            use_all = self.t('Use all detected game folders', 'Использовать все найденные папки с играми')
+            selected = self.choose(self.t('Games to include', 'Какие игры включить'),
+                                   ([(options, use_all + ': ' + ', '.join(map(str, options)))] if options else []) + [(None, self.t('Browse…', 'Выбрать папку…'))])
+            rom_dirs = selected or [self.directory(self.t('Folder with your Switch games', 'Папка с твоими играми Switch'), mount)]
+        steam_config = self.steam_profile()
+        count = len(card.catalog_games(mount, manifest)) if ready else self.t('from selected folders', 'из выбранных папок')
+        details = self.t('Connect existing card', 'Подключить готовую карту') if ready else self.t('Copy and verify data; originals are retained', 'Скопировать и проверить данные; оригиналы сохраняются')
+        self.dialog('--yesno', self.t('Install Switch Deck Sync?', 'Установить Switch Deck Sync?') + '\n\n' +
+                    details + '\n' + str(mount) + '\n' + self.t('Games: ', 'Игры: ') + str(count) + '\n\n' +
+                    self.t('Switch Deck Sync will appear in Steam. Add games and artwork using Steam ROM Manager.',
+                           'В Steam появится Switch Deck Sync. Игры и обложки добавляй через Steam ROM Manager.'))
+        self.close_steam()
+        self.busy()
+        try:
+            setup.install(self.package, self.home, mount, slot, executable, root, steam_config,
+                          mode, rom_dirs, self.progress)
+        finally:
+            self.end_busy()
+        if ready:
+            message = self.t(
+                'Setup complete. Open Steam from the application menu to launch Switch Deck Sync. Your card’s sync settings are ready to use. Use Steam ROM Manager to add games and artwork.',
+                'Установка завершена. Открой Steam через меню приложений и запусти Switch Deck Sync. Настройки синхронизации с карты уже готовы к использованию. Игры и обложки добавляй через Steam ROM Manager.')
+        else:
+            message = self.t(
+                'Setup complete. Open Steam from the application menu, then launch Switch Deck Sync to choose your Switch address, profiles and games. For Switch setup, see docs/SWITCH.md in this folder.',
+                'Установка завершена. Открой Steam через меню приложений, затем запусти Switch Deck Sync и выбери адрес Switch, профили и игры. Настройка самого Switch описана в docs/SWITCH.md в этой папке.')
+        self.dialog('--msgbox', message)
+        exported = srm_artwork.destination(mount)
+        if any((exported / name).is_file() for name in srm_artwork.MANIFESTS):
+            self.dialog('--msgbox', self.t('This card has SRM artwork. In Steam ROM Manager, generate your app list, choose Import image choices and select:\n',
+                                           'На карте есть обложки SRM. Создай список игр в Steam ROM Manager, выбери Import image choices и папку:\n') + str(exported))
+
+
+def main(package):
+    if sys.platform != 'linux':
+        raise SystemExit('Run this installer on SteamOS / Linux, in Desktop Mode.')
+    if not shutil.which('kdialog'):
+        raise SystemExit('KDE kdialog is required. Run on SteamOS in Desktop Mode.')
+    wizard = Wizard(package)
+    try:
+        wizard.run()
+    except Cancelled:
+        return 0
+    except Exception as ex:
+        wizard.end_busy()
+        subprocess.run(['kdialog', '--title', 'Switch Deck Sync', '--error', str(ex)], check=False)
+        return 1
     return 0

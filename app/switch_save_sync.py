@@ -78,7 +78,7 @@ def ensure_idle():
         try:
             cmd = (p / 'cmdline').read_bytes().split(b'\0')[0].decode(errors='replace')
             if Path(cmd).name.lower() in ('ryujinx', 'ryujinx.headless.sdl2', 'ryujinx.avalonia'):
-                raise SyncError('Сначала сохранись и полностью закрой Ryujinx через меню Steam.')
+                raise SyncError('Сначала сохранись и полностью закрой Ryujinx.')
         except (FileNotFoundError, PermissionError, ProcessLookupError):
             pass
 
@@ -188,7 +188,7 @@ def install_local(save, source, game, run):
         shutil.rmtree(stage / generation)
         shutil.copytree(source, stage / generation)
         if digest_tree(stage / generation) != expected:
-            raise SyncError('Не прошла проверка подготовленной копии Deck')
+            raise SyncError('Не прошла проверка подготовленной копии Ryujinx')
     journal = {'kind': 'local', 'save': str(save), 'stage': str(stage), 'old': str(old),
                'source': str(source), 'run': str(run)}
     atomic_json(HOME / 'pending.json', journal)
@@ -199,7 +199,7 @@ def install_local(save, source, game, run):
         os.sync()
         for generation in ['0', '1']:
             if digest_tree(save / generation) != expected:
-                raise SyncError('Не прошла проверка записанного сейва Deck')
+                raise SyncError('Не прошла проверка записанного сейва Ryujinx')
     except BaseException:
         if save.exists():
             save.rename(run / 'failed-local-save')
@@ -244,7 +244,7 @@ class Sync:
             if stage.exists():
                 shutil.rmtree(stage)
             if not save.is_dir():
-                raise SyncError('Не удалось восстановить папку сохранений Deck')
+                raise SyncError('Не удалось восстановить папку сохранений Ryujinx')
         self.pending.unlink()
 
     def run(self, dry_run=False):
@@ -278,7 +278,7 @@ class Sync:
             before = digest_tree(local_source)
             shutil.copytree(local_source, work / 'deck')
             if digest_tree(work / 'deck') != before or digest_tree(local_source) != before:
-                raise SyncError('Сохранение Deck изменилось при копировании')
+                raise SyncError('Сохранение Ryujinx изменилось при копировании')
             remote = self.settings['account_path'] + '/' + game.get('remote_name', '[' + game['title_id'] + ']')
             switch = self.store.snapshot(remote, work / 'switch')
             direction = decide(state.get(key), before, switch)
@@ -292,21 +292,21 @@ class Sync:
                 results.append(game['name'] + ': пропущено, обе копии сохранены')
                 continue
             if dry_run:
-                results.append(game['name'] + ': ' + {'same': 'совпадают', 'deck': 'Deck → Switch', 'switch': 'Switch → Deck'}[direction])
+                results.append(game['name'] + ': ' + {'same': 'совпадают', 'deck': 'Ryujinx → Switch', 'switch': 'Switch → Ryujinx'}[direction])
                 continue
             if direction != 'same':
                 ensure_idle()
                 if digest_tree(local_source) != before:
-                    raise SyncError('Сохранение Deck изменилось; запусти синхронизацию заново')
+                    raise SyncError('Сохранение Ryujinx изменилось; запусти синхронизацию заново')
                 confirm = self.store.snapshot(remote, work / 'switch-before-write')
                 if confirm != switch:
                     raise SyncError('Сохранение Switch изменилось; запусти синхронизацию заново')
                 if direction == 'switch':
-                    self.progress(game['name'] + ': Switch → Deck…')
+                    self.progress(game['name'] + ': Switch → Ryujinx…')
                     install_local(save, work / 'switch', game, work)
                     agreed = switch
                 elif direction == 'deck':
-                    self.progress(game['name'] + ': Deck → Switch…')
+                    self.progress(game['name'] + ': Ryujinx → Switch…')
                     # Journal is durable before the first remote write. Recovery
                     # always uses the complete pre-transfer snapshot.
                     atomic_json(self.pending, {'kind': 'remote', 'remote': remote,
@@ -338,7 +338,7 @@ class Sync:
             atomic_json(self.state_file, state)
             if self.pending.exists():
                 self.pending.unlink()
-            results.append(game['name'] + ': ' + {'same': 'совпадают', 'deck': 'Deck → Switch ✓', 'switch': 'Switch → Deck ✓'}[direction])
+            results.append(game['name'] + ': ' + {'same': 'совпадают', 'deck': 'Ryujinx → Switch ✓', 'switch': 'Switch → Ryujinx ✓'}[direction])
         atomic_json(run / 'result.json', {'results': results, 'dry_run': dry_run})
         if not dry_run:
             atomic_json(HOME / 'last-result.json', {'results': results,

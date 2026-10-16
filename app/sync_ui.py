@@ -155,7 +155,7 @@ def run_gui(check=False):
                 return
             if index==0:edit('server')
             elif index==1:
-                if os.environ.get('SDS_DATA_DIR'):
+                if os.environ.get('SDS_PORTABLE_LIBRARY') == '1':
                     go('error');error='Папкой Ryujinx управляет библиотека на карте. Для изменения подключения используй установщик.'
                 else:edit('path')
             elif index==2:discover('switch')
@@ -284,7 +284,7 @@ def run_gui(check=False):
             elif phase=='conflict':
                 text('Нужно выбрать копию',66,210,32,(245,193,104));text(status,66,270,26)
                 text('Выбери прогресс для обоих устройств. Обе версии уже сохранены в резерве. Даты файлов не определяют выбор.',66,330,26)
-                buttons=[(66,630,350,82,'Взять Switch'),(465,630,350,82,'Взять Deck'),(864,630,350,82,'Пропустить')]
+                buttons=[(66,630,350,82,'Взять Switch'),(465,630,350,82,'Взять Ryujinx'),(864,630,350,82,'Пропустить')]
             elif phase=='error':
                 text('Не удалось завершить',66,200,32,(245,158,137));text(error,66,270,26)
                 buttons=[(465,646,350,76,'Настройки'),(864,646,350,76,'На главный')]
