@@ -191,6 +191,18 @@ class NativeCardTests(unittest.TestCase):
         self.assertTrue((self.source / 'system/Profiles.json').is_file())
         self.assertFalse((self.source / 'executed.json').exists())
 
+    def test_sync_refuses_stale_service_identity_before_starting_transfer(self):
+        self.prepare()
+        self.install()
+        host = card.read(self.local / 'host.json')
+        other = card.read(card.marker_path(self.mount))
+        other['library_id'] = 'c' * 32
+        with patch.object(card, 'locate', return_value=(self.mount, other, {})), \
+                patch.object(native_card.subprocess, 'Popen') as process:
+            with self.assertRaises(card.LibraryError):
+                native_card.run_sync([], self.local)
+            process.assert_not_called()
+
     def test_installed_background_service_attaches_and_stops_without_starting_emulator(self):
         self.prepare()
         self.install()

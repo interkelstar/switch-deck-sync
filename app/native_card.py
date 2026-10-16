@@ -244,6 +244,9 @@ def run_sync(args, local=LOCAL):
     host = card.read(local / 'host.json')
     with card.session_lock(local):
         mount, manifest, _ = card.locate(host)
+        status = card.read(local / 'native-status.json')
+        if status.get('state') != 'ready' or status.get('library_id') != manifest['library_id'] or status.get('mount') != str(mount):
+            raise card.LibraryError('Карта ещё не подключена. Закрой игры и повтори запуск через секунду.')
         if not (local / 'active').resolve().is_dir():
             raise card.LibraryError('Карта ещё не подключена. Повтори запуск через секунду.')
         if not (Path(host['ryujinx_dir']) / 'bis').resolve().is_relative_to(mount.resolve()):
