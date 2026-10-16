@@ -1,4 +1,6 @@
 """Run save sync with either local settings or an attached card's settings."""
+from i18n import tr
+import i18n
 import os
 from pathlib import Path
 import shutil
@@ -12,7 +14,7 @@ LOCAL = Path(__file__).resolve().parent
 
 
 def launch(data, args, local=LOCAL, portable=False):
-    env = dict(os.environ, SDS_DATA_DIR=str(data))
+    env = dict(os.environ, SDS_DATA_DIR=str(data), SDS_LANGUAGE=i18n.preferred_language(local / 'preferences.json'))
     env.pop('SDS_PORTABLE_LIBRARY', None)
     if portable:
         env['SDS_PORTABLE_LIBRARY'] = '1'
@@ -32,14 +34,15 @@ def launch(data, args, local=LOCAL, portable=False):
 
 
 def standalone(args, local=LOCAL):
+    i18n.load_language(local / 'preferences.json')
     from switch_save_sync import ensure_idle
     ensure_idle()
     with card.session_lock(local):
         if card.read(local / 'installation.json').get('architecture') != 'sync-only':
-            raise card.LibraryError('Открой Switch Deck Sync установленным ярлыком.')
+            raise card.LibraryError(tr('Открой Switch Deck Sync установленным ярлыком.'))
         data = local / 'data'
         if not (data / 'settings.json').is_file():
-            raise card.LibraryError('Не найдены настройки. Повтори установку Switch Deck Sync.')
+            raise card.LibraryError(tr('Не найдены настройки. Повтори установку Switch Deck Sync.'))
         return launch(data, args, local)
 
 

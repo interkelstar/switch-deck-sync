@@ -43,6 +43,14 @@ class ReleaseTests(unittest.TestCase):
             paths = release.build(root)
             hashes = [hashlib.sha256(p.read_bytes()).hexdigest() for p in paths]
             self.assertEqual(hashes, [hashlib.sha256(p.read_bytes()).hexdigest() for p in release.build(root)])
+            for filename, source in [('ftpsrv-save-sync.nro','switch/ftpsrv-save-sync.nro'),
+                                     ('ftpsrv-save-sync-source.zip','switch/source.zip'),
+                                     ('ftpsrv-config.ini.example','switch/config.ini.example'),
+                                     ('ftpsrv-THIRD-PARTY-NOTICES.txt','switch/THIRD-PARTY-NOTICES.txt')]:
+                self.assertEqual((root/'dist'/filename).read_bytes(), (root/source).read_bytes().replace(b'\r\n',b'\n') if filename.endswith(('.example','.txt')) else (root/source).read_bytes())
+            sums = (root/'dist/SHA256SUMS.txt').read_text()
+            for filename in ('ftpsrv-save-sync.nro','ftpsrv-save-sync-source.zip', 'ftpsrv-config.ini.example','ftpsrv-THIRD-PARTY-NOTICES.txt'):
+                self.assertIn(hashlib.sha256((root/'dist'/filename).read_bytes()).hexdigest() + '  ' + filename, sums)
             with zipfile.ZipFile(paths[0]) as z:
                 prefix = z.namelist()[0].split('/')[0] + '/'
                 manifest = json.loads(z.read(prefix + 'SHA256SUMS.json'))

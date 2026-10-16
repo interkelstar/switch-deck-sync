@@ -15,14 +15,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Desktop launcher test dependencies
-        run: sudo apt-get update && sudo apt-get install -y python3-gi gir1.2-glib-2.0
+        run: sudo apt-get update && sudo apt-get install -y python3-gi gir1.2-glib-2.0 libsdl2-2.0-0 libsdl2-ttf-2.0-0 fonts-dejavu-core xvfb
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Test
         env:
           PYTHONPATH: app
-        run: python -m unittest discover -s tests -v
+          SDS_REQUIRE_UI_TESTS: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: xvfb-run -a -s '-screen 0 1280x800x24' python -m unittest discover -s tests -v
       - name: Check tag and build release
         env:
           RELEASE_TAG: ${{ github.ref_name }}

@@ -1,4 +1,5 @@
 """Discover account saves; no user names, title IDs or addresses are built in."""
+from i18n import tr
 import datetime
 import ftplib
 import json
@@ -34,7 +35,7 @@ def local_saves(settings):
     saves = []
     folder = root/'bis/user/save'
     if not folder.exists():
-        raise core.SyncError('Не найдены сейвы Ryujinx. Укажи папку Ryujinx в настройках.')
+        raise core.SyncError(tr('Не найдены сейвы Ryujinx. Укажи папку Ryujinx в настройках.'))
     for p in sorted(folder.iterdir()):
         if not p.is_dir() or p.is_symlink() or not (p/'ExtraData0').is_file():
             continue
@@ -65,12 +66,12 @@ def local_profiles(settings):
                 candidates = [struct.pack('<QQ',int(value[:16],16),int(value[16:],16)).hex(),
                               int(value,16).to_bytes(16,'little').hex()]
                 matching = set(candidates)&owners
-                if len(matching)==1:names[matching.pop()]=item.get('name','Профиль Ryujinx')
-    return [{'uid':uid,'name':names.get(uid,'Профиль '+uid[:8])} for uid in sorted(owners)]
+                if len(matching)==1:names[matching.pop()]=item.get('name',tr('Профиль Ryujinx'))
+    return [{'uid':uid,'name':names.get(uid,tr('Профиль ')+uid[:8])} for uid in sorted(owners)]
 
 def connect(settings):
     if not settings.get('host'):
-        raise core.SyncError('Сначала укажи адрес Switch в настройках подключения.')
+        raise core.SyncError(tr('Сначала укажи адрес Switch в настройках подключения.'))
     ftp=ftplib.FTP();ftp.connect(settings['host'],settings.get('port',5000),timeout=12);ftp.login()
     return ftp
 
@@ -81,7 +82,7 @@ def parse_endpoint(value):
         if not 1<=port<=65535:raise ValueError()
         return host,port
     except (ValueError,TypeError):
-        raise core.SyncError('Введи IPv4 и порт, например 192.168.1.50:5000.') from None
+        raise core.SyncError(tr('Введи IPv4 и порт, например 192.168.1.50:5000.')) from None
 
 def switch_profiles(settings):
     with connect(settings) as ftp:
@@ -93,19 +94,19 @@ def switch_profiles(settings):
             profiles.append({'uid':match.group(1).upper(),'name':entry[:match.start()].strip(),
                              'path':'/save:/'+entry+'/files'})
     if not profiles:
-        raise core.SyncError('Сервер не показал профили сохранений. Запусти ftpsrv Save Sync с доступом к сейвам.')
+        raise core.SyncError(tr('Сервер не показал профили сохранений. Запусти ftpsrv Save Sync с доступом к сейвам.'))
     return profiles
 
 def game_key(game, account_path):
     match=UID.search(account_path)
-    if not match:raise core.SyncError('Сначала выбери профиль Switch.')
+    if not match:raise core.SyncError(tr('Сначала выбери профиль Switch.'))
     return game['title_id'].lower()+'-'+game['user_id']+'-'+match.group(1).lower()
 
 def discover_games(settings):
     if not settings.get('account_path'):
-        raise core.SyncError('Сначала выбери профиль Switch в настройках.')
+        raise core.SyncError(tr('Сначала выбери профиль Switch в настройках.'))
     owner=settings.get('deck_profile_uid')
-    if not owner:raise core.SyncError('Сначала выбери профиль Ryujinx в настройках.')
+    if not owner:raise core.SyncError(tr('Сначала выбери профиль Ryujinx в настройках.'))
     with connect(settings) as ftp:
         ftp.cwd(settings['account_path']);entries=ftp.nlst()
     remote={}
@@ -119,7 +120,7 @@ def discover_games(settings):
         item=local.get(title)
         game=({k:v for k,v in item.items() if k!='save_path'} if item else
               {'title_id':title,'user_id':owner,'name':''})
-        game['name']=game['name'] or remote_title or ('Игра '+game['title_id'])
+        game['name']=game['name'] or remote_title or (tr('Игра ')+game['title_id'])
         game['remote_name']=entry
         game['key']=game_key(game,settings['account_path'])
         game['available']=item is not None

@@ -13,6 +13,7 @@ import time
 import card_library as card
 import setup_library as setup
 import native_card
+import i18n
 
 
 class Cancelled(Exception):
@@ -208,7 +209,7 @@ class Wizard:
             self.close_steam()
         self.busy()
         try:
-            setup.install_sync_only(self.package, self.home, root, steam_config)
+            setup.install_sync_only(self.package, self.home, root, steam_config, language='ru' if self.ru else 'en')
         finally:
             self.end_busy()
         self.dialog('--msgbox', self.t(
@@ -218,6 +219,7 @@ class Wizard:
     def run(self):
         self.dependencies()
         self.ru = self.choose('Language / Язык', [(False, 'English'), (True, 'Русский')])
+        i18n.set_language('ru' if self.ru else 'en')
         self.dialog('--msgbox', self.t(
             'Sync your Ryujinx saves with your Switch over Wi-Fi.',
             'Обменивайся сейвами между Ryujinx и Switch по Wi-Fi.'))
@@ -278,7 +280,7 @@ class Wizard:
         self.busy()
         try:
             setup.install(self.package, self.home, mount, slot, executable, root, steam_config,
-                          mode, rom_dirs, self.progress)
+                          mode, rom_dirs, self.progress, language='ru' if self.ru else 'en')
         finally:
             self.end_busy()
         if ready:

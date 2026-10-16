@@ -10,18 +10,19 @@ import tarfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ['install.py', 'install.sh', 'Install.desktop', 'README.md', 'LICENSE', 'VERSION',
+FILES = ['install.py', 'install.sh', 'Install.desktop', 'README.md', 'CONTRIBUTING.md', 'CHANGELOG.md', 'LICENSE', 'VERSION',
          'app/card_library.py', 'app/switch_save_sync.py', 'app/sync_config.py', 'app/sync_ui.py',
          'app/setup_library.py', 'app/setup_wizard.py', 'app/steam_shortcuts.py',
+         'app/i18n.py', 'app/locales/en.json',
          'app/native_card.py', 'app/legacy_migration.py', 'app/sync_launcher.py',
-         'docs/ARCHITECTURE.md', 'docs/SWITCH.md', 'docs/STEAM-MACHINE-TEST.md',
+         'docs/ARCHITECTURE.md', 'docs/INSTALL.md', 'docs/INSTALL.ru.md', 'docs/SWITCH.md', 'docs/STEAM-MACHINE-TEST.md', 'ROADMAP.md',
          'switch/ftpsrv-save-sync.nro', 'switch/source.zip', 'switch/save-write.patch',
          'switch/config.ini.example', 'switch/THIRD-PARTY-NOTICES.txt']
 ART = ['cover.png', 'hero.png', 'grid.png', 'logo.png', 'logo.svg', 'icon.png', 'icon.svg',
        'icon.ico', 'icon.bmp', 'PROMPTS.txt', 'GRID-PROMPT.txt']
 FILES += ['art/' + name for name in ART]
 FORBIDDEN = {'settings.json', 'state.json', 'pending.json', 'prod.keys', 'title.keys',
-             'host.json', 'installation.json', 'known_hosts', 'deck_access'}
+             'host.json', 'installation.json', 'preferences.json', 'known_hosts', 'deck_access'}
 
 
 def contents(root=ROOT):
@@ -73,8 +74,16 @@ def build(root=ROOT):
                 info.mtime = 0
                 tar.addfile(info, io.BytesIO(data))
     sums = out / 'SHA256SUMS.txt'
+    companion = out / 'ftpsrv-save-sync.nro'
+    companion.write_bytes(values['switch/ftpsrv-save-sync.nro'])
+    companion_source = out / 'ftpsrv-save-sync-source.zip'
+    companion_source.write_bytes(values['switch/source.zip'])
+    config = out / 'ftpsrv-config.ini.example'
+    config.write_bytes(values['switch/config.ini.example'])
+    notices = out / 'ftpsrv-THIRD-PARTY-NOTICES.txt'
+    notices.write_bytes(values['switch/THIRD-PARTY-NOTICES.txt'])
     sums.write_text(''.join(hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.name + '\n'
-                            for p in (archive, tarpath)), encoding='utf-8')
+                            for p in (archive, tarpath, companion, companion_source, config, notices)), encoding='utf-8')
     print(json.dumps({'version': version, 'files': len(values), 'archives': [p.name for p in (archive, tarpath)]}))
     return archive, tarpath
 

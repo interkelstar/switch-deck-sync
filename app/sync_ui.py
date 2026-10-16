@@ -1,4 +1,6 @@
 """SDL window for Steam Deck Game Mode. Uses the system SDL2 and SDL2_ttf."""
+from i18n import tr
+import i18n
 import ctypes as C
 import ctypes.util
 import os
@@ -13,7 +15,7 @@ class Rect(C.Structure):
 class Color(C.Structure):
     _fields_ = [('r', C.c_uint8), ('g', C.c_uint8), ('b', C.c_uint8), ('a', C.c_uint8)]
 
-def run_gui(check=False):
+def run_gui(check=False, *, frame_hook=None):
     import switch_save_sync as core
     os.environ['SDL_VIDEODRIVER'] = 'x11'
     appid = os.environ.get('SteamAppId')
@@ -48,7 +50,7 @@ def run_gui(check=False):
     bind(ttf,'TTF_RenderUTF8_Blended',P,[P,S,Color])
     sdl.SDL_SetHint(b'SDL_RENDER_DRIVER',b'opengl')
     if sdl.SDL_Init(0x6020):raise RuntimeError(sdl.SDL_GetError().decode())
-    if ttf.TTF_Init():raise RuntimeError('Не удалось открыть шрифты')
+    if ttf.TTF_Init():raise RuntimeError(tr('Не удалось открыть шрифты'))
     window=sdl.SDL_CreateWindow(b'Switch Deck Sync',0x2FFF0000,0x2FFF0000,1280,800,0x1007)
     renderer=sdl.SDL_CreateRenderer(window,-1,6)
     if not window or not renderer:raise RuntimeError(sdl.SDL_GetError().decode())
@@ -63,7 +65,7 @@ def run_gui(check=False):
     fontpath=next((x for x in candidates if x.exists()),None)
     if not fontpath:fontpath=next(Path('/usr/share/fonts').rglob('DejaVuSans.ttf'))
     fonts={size:ttf.TTF_OpenFont(str(fontpath).encode(),size) for size in [22,26,32,42]}
-    if not all(fonts.values()):raise RuntimeError('Не удалось открыть шрифт')
+    if not all(fonts.values()):raise RuntimeError(tr('Не удалось открыть шрифт'))
     controllers=[]
     def open_controller(index):
         if sdl.SDL_IsGameController(index):
@@ -92,16 +94,16 @@ def run_gui(check=False):
         except Exception as ex:
             message=str(ex)
             if (core.HOME/'pending.json').exists():
-                message+=' Не запускай игру на Switch. Повтори синхронизацию для восстановления.'
+                message+=tr(' Не запускай игру на Switch. Повтори синхронизацию для восстановления.')
             messages.put(('error',message))
         finally:store.close()
     def start():
         nonlocal status,results
-        go('working');status='Подключаюсь к Switch…';results=[]
+        go('working');status=tr('Подключаюсь к Switch…');results=[]
         threading.Thread(target=worker,args=(copy.deepcopy(settings),),daemon=True).start()
     def discover(kind):
         nonlocal status,pick_kind
-        pick_kind=kind;go('loading');status='Читаю профили и сохранения…'
+        pick_kind=kind;go('loading');status=tr('Читаю профили и сохранения…')
         snapshot=copy.deepcopy(settings)
         def fetch():
             try:
@@ -151,21 +153,30 @@ def run_gui(check=False):
             else:running=False
         elif phase=='settings':
             if index in [1,2,3,4] and (core.HOME/'pending.json').exists():
-                go('error');error='Сначала повтори синхронизацию для восстановления прерванной передачи.'
+                go('error');error=tr('Сначала повтори синхронизацию для восстановления прерванной передачи.')
                 return
             if index==0:edit('server')
             elif index==1:
                 if os.environ.get('SDS_PORTABLE_LIBRARY') == '1':
-                    go('error');error='Папкой Ryujinx управляет библиотека на карте. Для изменения подключения используй установщик.'
+                    go('error');error=tr('Папкой Ryujinx управляет библиотека на карте. Для изменения подключения используй установщик.')
                 else:edit('path')
             elif index==2:discover('switch')
             elif index==3:discover('deck')
             elif index==4:discover('games')
+            elif index==5:go('language')
             else:go('home')
+        elif phase=='language':
+            if index in (0,1):
+                try:
+                    i18n.set_language(['en','ru'][index], persist=True)
+                except (OSError, ValueError) as ex:
+                    go('error');error=str(ex)
+                    return
+            go('settings')
         elif phase=='done':go('home')
         elif phase=='conflict':
             event,answer=reply;answer['choice']=['switch','deck','skip'][index];event.set()
-            go('working');status='Продолжаю синхронизацию…'
+            go('working');status=tr('Продолжаю синхронизацию…')
         elif phase=='error':
             if index==0:go('settings')
             else:go('home')
@@ -177,7 +188,7 @@ def run_gui(check=False):
                     settings.update(host=host,port=port)
                 else:
                     root=Path(entry.strip()).expanduser()
-                    if not (root/'bis/user/save').is_dir():raise ValueError('В этой папке нет bis/user/save.')
+                    if not (root/'bis/user/save').is_dir():raise ValueError(tr('В этой папке нет bis/user/save.'))
                     if str(root)!=settings['ryujinx_dir']:
                         settings['games']={};settings.pop('deck_profile_uid',None);settings.pop('deck_profile_name',None)
                     settings['ryujinx_dir']=str(root)
@@ -189,7 +200,7 @@ def run_gui(check=False):
                 item=visible[index]
                 if pick_kind=='games':
                     if not item.get('available',True):
-                        error='Сначала запусти эту игру в Ryujinx и создай сохранение.'
+                        error=tr('Сначала запусти эту игру в Ryujinx и создай сохранение.')
                         return
                     error=''
                     if item['key'] in selected:selected.remove(item['key'])
@@ -252,59 +263,62 @@ def run_gui(check=False):
             sdl.SDL_SetRenderDrawColor(renderer,13,20,31,255);sdl.SDL_RenderClear(renderer)
             fill((0,0,640,7),(52,202,221));fill((640,0,640,7),(249,108,101))
             text('Switch Deck Sync',64,42,42)
-            text('Сохранения рядом, прогресс с собой',66,106,22,(147,174,195))
+            text(tr('Сохранения рядом, прогресс с собой'),66,106,22,(147,174,195))
             buttons=[]
             if phase=='home':
-                text('Готов к синхронизации',66,210,32)
-                address=settings.get('host') or 'Адрес пока не указан'
+                text(tr('Готов к синхронизации'),66,210,32)
+                address=settings.get('host') or tr('Адрес пока не указан')
                 text('Switch: '+address+((':'+str(settings['port'])) if settings.get('host') else ''),66,278)
-                text('Профили: '+settings.get('switch_profile_name','не выбран')+'  ↔  '+settings.get('deck_profile_name','не выбран'),66,326)
-                text('Выбрано игр: '+str(len(settings['games'])),66,374)
-                text('Закрой игры на обоих устройствах. На Switch открой ftpsrv Save Sync.',66,462,26,(166,185,203))
-                if (core.HOME/'pending.json').exists():text('Есть прерванная передача — повтори синхронизацию.',66,546,22,(250,174,117))
-                buttons=[(66,646,410,76,'Синхронизировать'),(506,646,350,76,'Настройки'),(886,646,328,76,'Выход')]
+                text(tr('Профили: ')+settings.get('switch_profile_name',tr('не выбран'))+'  ↔  '+settings.get('deck_profile_name',tr('не выбран')),66,326)
+                text(tr('Выбрано игр: ')+str(len(settings['games'])),66,374)
+                text(tr('Закрой игры на обоих устройствах. На Switch открой ftpsrv Save Sync.'),66,462,26,(166,185,203))
+                if (core.HOME/'pending.json').exists():text(tr('Есть прерванная передача — повтори синхронизацию.'),66,546,22,(250,174,117))
+                buttons=[(66,646,410,76,tr('Синхронизировать')),(506,646,350,76,tr('Настройки')),(886,646,328,76,tr('Выход'))]
             elif phase=='settings':
-                labels=[('Адрес Switch',settings.get('host','')+':'+str(settings['port'])),('Папка Ryujinx',settings['ryujinx_dir']),('Профиль Switch',settings.get('switch_profile_name','Выбрать')),('Профиль Ryujinx',settings.get('deck_profile_name','Выбрать')),('Игры',str(len(settings['games']))+' выбрано')]
-                for i,(label,value) in enumerate(labels):buttons.append((66,184+i*85,1148,70,label+'   ·   '+value))
-                buttons.append((864,646,350,76,'Назад'))
+                labels=[(tr('Адрес Switch'),settings.get('host','')+':'+str(settings['port'])),(tr('Папка Ryujinx'),settings['ryujinx_dir']),(tr('Профиль Switch'),settings.get('switch_profile_name',tr('Выбрать'))),(tr('Профиль Ryujinx'),settings.get('deck_profile_name',tr('Выбрать'))),(tr('Игры'),str(len(settings['games']))+tr(' выбрано')),(tr('Язык'),i18n.LANGUAGES[i18n.language()])]
+                for i,(label,value) in enumerate(labels):buttons.append((66,174+i*76,1148,65,label+'   ·   '+value))
+                buttons.append((864,646,350,76,tr('Назад')))
+            elif phase=='language':
+                text(tr('Язык интерфейса'),66,180,32)
+                buttons=[(66,260,550,80,i18n.LANGUAGES['en']),(646,260,568,80,i18n.LANGUAGES['ru']),(864,646,350,76,tr('Назад'))]
             elif phase in ['working','loading']:
-                text('Синхронизация' if phase=='working' else 'Поиск',66,224,32)
+                text(tr('Синхронизация') if phase=='working' else tr('Поиск'),66,224,32)
                 text(status,66,294,26)
                 fill((66,395,1148,12),(43,53,68));pos=int((sdl.SDL_GetTicks()%2400)/2400*900)
                 fill((66+pos,395,240,12),(52,202,221))
-                text('Оставь ftpsrv Save Sync открытым на Switch.',66,475,26,(168,183,202))
-                text('Перед заменой сохраняются резервные копии.',66,520,22,(145,164,187))
+                text(tr('Оставь ftpsrv Save Sync открытым на Switch.'),66,475,26,(168,183,202))
+                text(tr('Перед заменой сохраняются резервные копии.'),66,520,22,(145,164,187))
             elif phase=='done':
-                text('Проверка завершена',66,188,32,(114,220,169))
+                text(tr('Проверка завершена') if check else tr('Синхронизация завершена'),66,188,32,(114,220,169))
                 y=245
                 for result in results[:5]:text(result,66,y,22);y+=66
-                if len(results)>5:text('Ещё '+str(len(results)-5)+' игр. Полный итог сохранён в журнале.',66,580,22)
-                else:text('Можно закрыть ftpsrv и запускать игру.',66,582,26,(168,183,202))
-                buttons=[(864,646,350,76,'Готово')]
+                if len(results)>5:text(tr('Ещё ')+str(len(results)-5)+tr(' игр. Полный итог сохранён в журнале.'),66,580,22)
+                else:text(tr('Можно закрыть ftpsrv и запускать игру.'),66,582,26,(168,183,202))
+                buttons=[(864,646,350,76,tr('Готово'))]
             elif phase=='conflict':
-                text('Нужно выбрать копию',66,210,32,(245,193,104));text(status,66,270,26)
-                text('Выбери прогресс для обоих устройств. Обе версии уже сохранены в резерве. Даты файлов не определяют выбор.',66,330,26)
-                buttons=[(66,630,350,82,'Взять Switch'),(465,630,350,82,'Взять Ryujinx'),(864,630,350,82,'Пропустить')]
+                text(tr('Нужно выбрать копию'),66,210,32,(245,193,104));text(status,66,270,26)
+                text(tr('Выбери прогресс для обоих устройств. Обе версии уже сохранены в резерве. Даты файлов не определяют выбор.'),66,330,26)
+                buttons=[(66,630,350,82,tr('Взять Switch')),(465,630,350,82,tr('Взять Ryujinx')),(864,630,350,82,tr('Пропустить'))]
             elif phase=='error':
-                text('Не удалось завершить',66,200,32,(245,158,137));text(error,66,270,26)
-                buttons=[(465,646,350,76,'Настройки'),(864,646,350,76,'На главный')]
+                text(tr('Не удалось завершить'),66,200,32,(245,158,137));text(error,66,270,26)
+                buttons=[(465,646,350,76,tr('Настройки')),(864,646,350,76,tr('На главный'))]
             elif phase=='edit':
-                text('Адрес Switch' if edit_kind=='server' else 'Папка данных Ryujinx',66,180,32)
-                text('Steam + X — клавиатура. B — отменить.',66,236,22,(168,183,202))
+                text(tr('Адрес Switch') if edit_kind=='server' else tr('Папка данных Ryujinx'),66,180,32)
+                text(tr('Steam + X — клавиатура. B — отменить.'),66,236,22,(168,183,202))
                 fill((66,295,1148,90),(34,48,64));text(entry+'|',84,312,26,width=1100)
                 text(error,66,408,22,(245,193,104))
-                buttons=[(465,646,350,76,'Сохранить'),(864,646,350,76,'Отмена')]
+                buttons=[(465,646,350,76,tr('Сохранить')),(864,646,350,76,tr('Отмена'))]
             elif phase=='pick':
-                title={'switch':'Выбери профиль Switch','deck':'Выбери профиль Ryujinx','games':'Игры для синхронизации'}[pick_kind]
+                title={'switch':tr('Выбери профиль Switch'),'deck':tr('Выбери профиль Ryujinx'),'games':tr('Игры для синхронизации')}[pick_kind]
                 text(title,66,160,32)
-                if pick_kind=='games':text('Все сейвы Switch. Для синхронизации нужен сейв и в Ryujinx.',66,204,22,(147,174,195))
-                if not choices:text('Общих сохранений пока нет. Запусти игру и создай сейв на обоих устройствах.',66,270,26)
+                if pick_kind=='games':text(tr('Все сейвы Switch. Для синхронизации нужен сейв и в Ryujinx.'),66,204,22,(147,174,195))
+                if not choices:text(tr('Общих сохранений пока нет. Запусти игру и создай сейв на обоих устройствах.'),66,270,26)
                 for i,item in enumerate(choices[page*4:page*4+4]):
                     mark=('[✓] ' if item['key'] in selected else '[  ] ') if pick_kind=='games' else ''
-                    if pick_kind=='games' and not item['available']:mark='Нет сейва Ryujinx · '
+                    if pick_kind=='games' and not item['available']:mark=tr('Нет сейва Ryujinx · ')
                     buttons.append((66,247+i*78,1148,65,mark+item['name']))
-                text(error or ('Страница '+str(page+1)+' / '+str(max(1,(len(choices)+3)//4))),66,584,22,(245,193,104) if error else (147,174,195))
-                buttons.extend([(66,646,250,76,'← Назад'),(346,646,250,76,'Вперёд →'),(626,646,285,76,'Применить'),(941,646,273,76,'Отмена')])
+                text(error or (tr('Страница ')+str(page+1)+' / '+str(max(1,(len(choices)+3)//4))),66,584,22,(245,193,104) if error else (147,174,195))
+                buttons.extend([(66,646,250,76,tr('← Назад')),(346,646,250,76,tr('Вперёд →')),(626,646,285,76,tr('Применить')),(941,646,273,76,tr('Отмена'))])
             selection=min(selection,max(0,len(buttons)-1))
             for i,(x,y,w,h,label) in enumerate(buttons):
                 fill((x,y,w,h),(34,112,140) if i==selection else (30,44,61))
@@ -314,7 +328,9 @@ def run_gui(check=False):
                     if width.value<=w-40:break
                     original=original[:-1];label=original+'…'
                 text(label,x+20,y+18,22,width=w-35)
-            if buttons:text('A — выбрать     B — назад     Крестовина — перемещение',66,756,22,(145,164,187))
+            if buttons:text(tr('A — выбрать     B — назад     Крестовина — перемещение'),66,756,22,(145,164,187))
+            if frame_hook is not None:
+                frame_hook(phase, buttons, renderer, sdl)
             sdl.SDL_RenderPresent(renderer)
     finally:
         sdl.SDL_StopTextInput()

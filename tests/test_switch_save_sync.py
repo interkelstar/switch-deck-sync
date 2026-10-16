@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import switch_save_sync as s
+import i18n
 
 class DiskStore:
     def __init__(self, root):
@@ -34,6 +35,8 @@ class DiskStore:
 
 class SyncTests(unittest.TestCase):
     def setUp(self):
+        self.old_language = i18n.language()
+        i18n.set_language('en')
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.home = self.root / 'sync'
@@ -59,6 +62,7 @@ class SyncTests(unittest.TestCase):
         self.store = DiskStore(self.remote)
 
     def tearDown(self):
+        i18n.set_language(self.old_language)
         self.idle.stop()
         s.HOME = self.old_home
         self.tmp.cleanup()
@@ -72,7 +76,7 @@ class SyncTests(unittest.TestCase):
 
     def test_unchanged_no_remote_write(self):
         result = self.engine().run()
-        self.assertIn('совпадают', result[0])
+        self.assertIn('identical', result[0])
         self.assertEqual(self.store.writes, 0)
 
     def test_deck_to_switch_and_common_baseline(self):
@@ -127,7 +131,7 @@ class SyncTests(unittest.TestCase):
     def test_failed_remote_write_restores_backup(self):
         self.deck_change()
         self.store.fail_write = True
-        with self.assertRaisesRegex(s.SyncError, 'восстановлен'):
+        with self.assertRaisesRegex(s.SyncError, 'restored'):
             self.engine().run()
         self.assertEqual(s.digest_tree(self.remote), self.baseline)
         self.assertEqual((self.save / '0/progress').read_text(), 'new Deck progress')
@@ -137,7 +141,7 @@ class SyncTests(unittest.TestCase):
     def test_unrecoverable_connection_preserves_pending_then_recovers(self):
         self.deck_change()
         self.store.fail_write = self.store.fail_connect = True
-        with self.assertRaisesRegex(s.SyncError, 'Не запускай'):
+        with self.assertRaisesRegex(s.SyncError, 'Do not start'):
             self.engine().run()
         self.assertTrue((self.home / 'pending.json').exists())
         self.assertEqual(s.read_json(self.home / 'state.json')['zelda'], self.baseline)

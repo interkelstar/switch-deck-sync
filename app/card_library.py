@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Validate and describe card-owned library data; no emulator launch path."""
+from i18n import tr
 import contextlib
 import fcntl
 import json
@@ -22,14 +23,14 @@ def write_changed(path,value):
     tmp.replace(path)
 
 def relative_path(value):
-    if not isinstance(value,str) or not value or '\\' in value or '\x00' in value:raise LibraryError('Некорректный путь библиотеки.')
+    if not isinstance(value,str) or not value or '\\' in value or '\x00' in value:raise LibraryError(tr('Некорректный путь библиотеки.'))
     p=Path(value)
-    if p.is_absolute() or '..' in p.parts:raise LibraryError('Путь библиотеки выходит за пределы карты.')
+    if p.is_absolute() or '..' in p.parts:raise LibraryError(tr('Путь библиотеки выходит за пределы карты.'))
     return p
 
 def contained(base,value):
     target=base/relative_path(value)
-    if not target.resolve().is_relative_to(base.resolve()):raise LibraryError('Данные библиотеки ссылаются за пределы карты.')
+    if not target.resolve().is_relative_to(base.resolve()):raise LibraryError(tr('Данные библиотеки ссылаются за пределы карты.'))
     return target
 
 def slot_devices(devices,slot):
@@ -39,9 +40,9 @@ def slot_devices(devices,slot):
                 and re.fullmatch(r'mmcblk\d+',d.get('name',Path(d['path']).name))]
     if slot.get('kind')=='reader-path':
         path=Path(slot.get('path',''))
-        if not str(path).startswith('/dev/disk/by-path/'):raise LibraryError('Нужен путь считывателя /dev/disk/by-path/.')
+        if not str(path).startswith('/dev/disk/by-path/'):raise LibraryError(tr('Нужен путь считывателя /dev/disk/by-path/.'))
         return [d for d in devices if d['path']==str(path.resolve())]
-    raise LibraryError('Не настроен встроенный слот карт памяти.')
+    raise LibraryError(tr('Не настроен встроенный слот карт памяти.'))
 
 def partitions(device):
     result=[]
@@ -59,16 +60,16 @@ def marker_path(mount):
 
 def validated_manifest(mount):
     marker=marker_path(mount)
-    if not marker.is_file() or marker.is_symlink():raise LibraryError('На карте в слоте нет описания библиотеки Switch.')
+    if not marker.is_file() or marker.is_symlink():raise LibraryError(tr('На карте в слоте нет описания библиотеки Switch.'))
     value=read(marker)
-    if value.get('schema') not in [1,2]:raise LibraryError('Неизвестная версия библиотеки Switch.')
-    if not re.fullmatch(r'[0-9a-fA-F]{32}',value.get('library_id','')):raise LibraryError('Отсутствует идентификатор содержимого библиотеки.')
+    if value.get('schema') not in [1,2]:raise LibraryError(tr('Неизвестная версия библиотеки Switch.'))
+    if not re.fullmatch(r'[0-9a-fA-F]{32}',value.get('library_id','')):raise LibraryError(tr('Отсутствует идентификатор содержимого библиотеки.'))
     for key in ['data_dir','rom_dir','sync_dir']:
-        if not contained(mount,value.get(key)).is_dir():raise LibraryError('Не найдена папка библиотеки: '+key)
+        if not contained(mount,value.get(key)).is_dir():raise LibraryError(tr('Не найдена папка библиотеки: ')+key)
     for name in ['bis/user/save','system','mods','sdcard']:
-        if not contained(mount,value['data_dir']+'/'+name).is_dir():raise LibraryError('Не найдены данные профиля: '+name)
-    if not contained(mount,value['sync_dir']+'/settings.json').is_file():raise LibraryError('Не найдены настройки синхронизации этой библиотеки.')
-    if not isinstance(value.get('game_metadata',{}),dict) or not isinstance(value.get('games'),list):raise LibraryError('Некорректный список игр.')
+        if not contained(mount,value['data_dir']+'/'+name).is_dir():raise LibraryError(tr('Не найдены данные профиля: ')+name)
+    if not contained(mount,value['sync_dir']+'/settings.json').is_file():raise LibraryError(tr('Не найдены настройки синхронизации этой библиотеки.'))
+    if not isinstance(value.get('game_metadata',{}),dict) or not isinstance(value.get('games'),list):raise LibraryError(tr('Некорректный список игр.'))
     for relative in value.get('game_metadata',{}):relative_path(relative)
     for game in value['games']:relative_path(game['rom'])
     # A legacy card_uuid is intentionally ignored. Cloning to another card works.
@@ -76,22 +77,22 @@ def validated_manifest(mount):
 
 def locate(host,allow_mount=True,devices=None):
     readers=slot_devices(block_devices() if devices is None else devices,host.get('slot',{'kind':'mmc'}))
-    if not readers:raise LibraryError('Вставь карту с библиотекой Switch во встроенный слот.')
-    if len(readers)!=1:raise LibraryError('Нужно выбрать один встроенный считыватель карт.')
+    if not readers:raise LibraryError(tr('Вставь карту с библиотекой Switch во встроенный слот.'))
+    if len(readers)!=1:raise LibraryError(tr('Нужно выбрать один встроенный считыватель карт.'))
     candidates=[];errors=[]
     for part in partitions(readers[0]):
         if part.get('fstype') in [None,'swap','crypto_LUKS']:continue
         mounts=[Path(p) for p in part.get('mountpoints',[]) if p]
         if not mounts and allow_mount:
             r=subprocess.run(['udisksctl','mount','--no-user-interaction','-b',part['path']],capture_output=True,text=True)
-            if r.returncode:errors.append('Не удалось подключить карту из слота.');continue
+            if r.returncode:errors.append(tr('Не удалось подключить карту из слота.'));continue
             refreshed=slot_devices(block_devices(),host.get('slot',{'kind':'mmc'}))
             part=next((p for d in refreshed for p in partitions(d) if p['path']==part['path']),part)
             mounts=[Path(p) for p in part.get('mountpoints',[]) if p]
         for mount in mounts:
             if marker_path(mount).is_file():candidates.append((mount,validated_manifest(mount),part))
-    if len(candidates)>1:raise LibraryError('В слоте несколько библиотек Switch; нужен один раздел.')
-    if not candidates:raise LibraryError(errors[0] if errors else 'На карте во встроенном слоте нет библиотеки Switch.')
+    if len(candidates)>1:raise LibraryError(tr('В слоте несколько библиотек Switch; нужен один раздел.'))
+    if not candidates:raise LibraryError(errors[0] if errors else tr('На карте во встроенном слоте нет библиотеки Switch.'))
     return candidates[0]
 
 def map_paths(value,alias):
@@ -155,5 +156,5 @@ def export_metadata(mount,manifest,alias,root,extra_paths=()):
 def session_lock(local=LOCAL):
     with (local/'session.lock').open('a+') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        except BlockingIOError:raise LibraryError('Сначала полностью закрой игру или синхронизацию.') from None
+        except BlockingIOError:raise LibraryError(tr('Сначала полностью закрой игру или синхронизацию.')) from None
         yield

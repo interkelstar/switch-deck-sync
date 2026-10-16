@@ -1,27 +1,85 @@
-# Switch companion
+# Set up ftpsrv Save Sync on Switch
 
-This preview uses a modified build of [ITotalJustice/ftpsrv](https://github.com/ITotalJustice/ftpsrv).
-Base: release 1.2.2, revision recorded in `switch/THIRD-PARTY-NOTICES.txt`.
+[Русский](#русский) · [Computer installation](INSTALL.md)
 
-1. Copy `switch/ftpsrv-save-sync.nro` to `/switch/` on your Switch SD card.
-2. Keep a backup of `/config/ftpsrv/config.ini`, if present.
-3. Merge `switch/config.ini.example` into that configuration. Important settings are
-   `anon=1`, `port=5000`, `mount_devices=1`, `save_writable=1`, `mount_bis=0`.
-4. Close the game and start **ftpsrv Save Sync** through homebrew.
-5. Enter its displayed IPv4 address and port in the desktop client. Both devices need
-   to be on the same reachable local network. Exit the Switch server with **+** afterwards.
+This companion is required for the current preview. It is a modified build of
+[ITotalJustice/ftpsrv](https://github.com/ITotalJustice/ftpsrv), based on release
+1.2.2. It exposes account saves for the desktop app to read and write over Wi-Fi.
+Use a Switch where homebrew is already configured.
 
-Existing ftpsrv configuration can affect both the original and modified builds. This
-release does not silently overwrite it, change NAND partitions or install a sysmodule.
-FTP in this preview is anonymous and unencrypted; the server should be open only for
-the transfer on your trusted local network.
+## Download and configure
 
-`switch/source.zip` contains the upstream source, modified files, build instructions
-and required attribution. `switch/save-write.patch` isolates the save-file write type
-check correction. The NRO has a custom application label and was built without USBHSFS
-and game-card features for this Wi-Fi use case. Its SHA-256 is recorded by the release
-builder alongside the other distributed files.
+1. Download **ftpsrv-save-sync.nro** from the release's **Assets**, or use the same
+   file in the installer's **switch/** folder. Copy it to **/switch/** on your
+   Switch SD card. It appears as **ftpsrv Save Sync** in the homebrew menu.
+2. The configuration path is **/config/ftpsrv/config.ini** on that SD card. Back
+   up an existing file before editing: standard ftpsrv builds share this path.
+3. If no configuration exists, copy **ftpsrv-config.ini.example** from Assets
+   (or **switch/config.ini.example** from the installer) to that path and rename
+   it **config.ini**. Create the directories if needed.
+4. For an existing configuration, merge these values into their named sections.
+   Do not duplicate sections or replace unrelated settings:
 
-DBI's FTP save reads failed for the original test installation with an out-of-range
-read. This companion is the supported backend for now. DBI support and an upstream
-ftpsrv fix are future work; no compatibility with arbitrary FTP save servers is claimed.
+```ini
+[Login]
+anon = 1
+
+[Network]
+port = 5000
+timeout = 30
+
+[Nx]
+mount_devices = 1
+save_writable = 1
+mount_bis = 0
+```
+
+## Use it
+
+1. Fully close the game on Switch and the emulator on the computer.
+2. Start **ftpsrv Save Sync** from homebrew and leave it open.
+3. Enter its displayed IPv4 and port in **Switch Deck Sync → Settings**. Both
+   devices must be reachable on the same local network.
+4. Choose the Switch/Ryujinx profiles and games in the desktop app, then sync.
+5. After success, press **+** on Switch to exit the server before playing. After
+   an interrupted transfer, keep the server open and rerun sync to recover first.
+
+FTP is anonymous and unencrypted. Run the server only during transfers on a
+trusted local network. The companion is a homebrew app, not a sysmodule.
+
+## Source and attribution
+
+Assets include **ftpsrv-save-sync-source.zip** and
+**ftpsrv-THIRD-PARTY-NOTICES.txt**. The source ZIP contains upstream source,
+modified files and build notes. The installer also includes them in **switch/**,
+along with **save-write.patch** and the upstream revision identifier.
+
+The modification corrects a save-file write type check. It also changes the
+application label and disables USBHSFS/game-card features for this Wi-Fi build.
+**SHA256SUMS.txt** covers the standalone NRO, source, config example and notices.
+
+DBI and other FTP save servers are not supported by this preview. See the
+[roadmap](../ROADMAP.md).
+
+## Русский
+
+Нужен **ftpsrv Save Sync** на Switch с уже настроенным homebrew.
+
+1. Скачай **ftpsrv-save-sync.nro** из **Assets** или возьми тот же файл из папки
+   **switch/** установочного ZIP. Скопируй в **/switch/** на карте Switch.
+2. Конфигурация: **/config/ftpsrv/config.ini**. Если файл есть, сначала сохрани
+   резервную копию: его использует и обычный ftpsrv.
+3. Если файла нет, скопируй **ftpsrv-config.ini.example** из Assets (или
+   **switch/config.ini.example** из установщика) в эту папку и переименуй в
+   **config.ini**. При необходимости создай папки.
+4. Для существующей конфигурации внеси значения из примера выше в соответствующие
+   секции, не дублируя их и сохраняя остальные настройки.
+5. Полностью закрой игры на обоих устройствах. Запусти **ftpsrv Save Sync**,
+   укажи показанные IPv4 и порт в настройках приложения на компьютере, выбери
+   профили и игры и запусти синхронизацию.
+6. После успеха выйди из сервера кнопкой **+** перед игрой. При прерванной
+   передаче сначала повтори синхронизацию для восстановления.
+
+Сервер используй только на время обмена в доверенной локальной сети: FTP здесь
+анонимный и без шифрования. Исходники, сведения об авторстве и контрольные суммы
+доступны в Assets рядом с NRO.

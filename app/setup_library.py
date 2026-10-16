@@ -1,4 +1,5 @@
 """Installation engine. No downloads, sudo, formatting or deletion of source data."""
+from i18n import tr
 import datetime
 import hashlib
 import json
@@ -13,11 +14,11 @@ import steam_shortcuts
 import native_card
 import legacy_migration
 
-VERSION = '0.4.1-preview'
+VERSION = '0.5.0-preview'
 SHARED = ('bis', 'system', 'mods', 'sdcard')
 RUNTIME = ('card_library.py', 'native_card.py', 'switch_save_sync.py', 'sync_config.py', 'sync_ui.py',
            'setup_library.py', 'setup_wizard.py', 'steam_shortcuts.py', 'legacy_migration.py',
-           'sync_launcher.py')
+           'sync_launcher.py', 'i18n.py', 'locales/en.json')
 
 
 class SetupError(Exception):
@@ -57,7 +58,7 @@ def copy_verified(source, target, progress=lambda text: None):
         return
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_name(target.name + '.sds-copy-' + uuid.uuid4().hex)
-    progress('Copy / проверка: ' + source.name)
+    progress(tr('Copy / проверка: ') + source.name)
     try:
         with source.open('rb') as src, temp.open('xb') as dst:
             shutil.copyfileobj(src, dst, 1024 * 1024)
@@ -232,7 +233,7 @@ def reader_slot(device, by_path=Path('/dev/disk/by-path')):
                    if p.is_symlink() and '-part' not in p.name
                    and str(p.resolve()) == device['path'])
     if not links:
-        raise SetupError('No stable hardware path for this reader. / Нет пути считывателя.')
+        raise SetupError(tr('No stable hardware path for this reader. / Нет пути считывателя.'))
     return {'kind': 'reader-path', 'path': str(links[0])}
 
 
@@ -245,9 +246,9 @@ def require_idle(proc=Path('/proc'), steam=True):
             name = Path(args[0].decode(errors='replace')).name.lower()
             if name in ('ryujinx', 'ryujinx.avalonia', 'ryujinx.headless.sdl2') or any(
                     b'switch_save_sync.py' in a or b'card_library.py' in a for a in args):
-                raise SetupError('Close Ryujinx and save sync. / Закрой эмулятор и синхронизацию.')
+                raise SetupError(tr('Close Ryujinx and save sync. / Закрой эмулятор и синхронизацию.'))
             if steam and name in ('steam', 'steamwebhelper'):
-                raise SetupError('Exit Steam, then continue. / Заверши Steam и продолжи установку.')
+                raise SetupError(tr('Exit Steam, then continue. / Заверши Steam и продолжи установку.'))
         except (FileNotFoundError, PermissionError, ProcessLookupError):
             continue
 
@@ -283,7 +284,7 @@ def portable_metadata(root, mount, progress):
 def prepare_card(mount, source_root, rom_dirs, progress=lambda text: None, sync_source=None):
     """Publish the marker only after complete, verified copies. Source data stays put."""
     if card.marker_path(mount).exists():
-        raise SetupError('Library already exists: use Attach. / Выбери подключение готовой карты.')
+        raise SetupError(tr('Library already exists: use Attach. / Выбери подключение готовой карты.'))
     for relative in ('Emulation/storage/ryujinx/data', 'Emulation/storage/ryujinx/.sds-preparing-data',
                      'Emulation/roms/switch', 'Emulation/tools/switch-save-sync'):
         card.contained(mount, relative)
@@ -295,16 +296,16 @@ def prepare_card(mount, source_root, rom_dirs, progress=lambda text: None, sync_
     if sync.exists() and not resuming:
         raise SetupError('Unregistered sync folder exists; preserve it before preparing this card.')
     if data.exists() and not resuming:
-        raise SetupError('Target data folder already exists. / Папка данных уже занята: ' + str(data))
+        raise SetupError(tr('Target data folder already exists. / Папка данных уже занята: ') + str(data))
     if not (source_root / 'system/prod.keys').is_file():
-        raise SetupError('Install your dumped prod.keys in Ryujinx first. / Добавь свои ключи в Ryujinx.')
+        raise SetupError(tr('Install your dumped prod.keys in Ryujinx first. / Добавь свои ключи в Ryujinx.'))
     firmware = source_root / 'bis/system/Contents/registered'
     if not firmware.is_dir() or not any(firmware.iterdir()):
-        raise SetupError('Install your dumped firmware in Ryujinx first. / Установи свою прошивку в Ryujinx.')
+        raise SetupError(tr('Install your dumped firmware in Ryujinx first. / Установи свою прошивку в Ryujinx.'))
     if not (source_root / 'system/Profiles.json').is_file():
-        raise SetupError('Start Ryujinx once to initialise a user profile. / Один раз запусти Ryujinx.')
+        raise SetupError(tr('Start Ryujinx once to initialise a user profile. / Один раз запусти Ryujinx.'))
     if pending.exists() and not resuming:
-        raise SetupError('A different preparation is pending on this card. / На карте другая незавершённая подготовка.')
+        raise SetupError(tr('A different preparation is pending on this card. / На карте другая незавершённая подготовка.'))
     stage_path = data.with_name('.sds-preparing-data')
     if stage_path.exists() and not resuming:
         raise SetupError('An unregistered staging folder exists on this card.')
@@ -372,7 +373,7 @@ def native_paths(home):
     return roms, launcher
 
 
-def install_app(tx, package, home, local, steam_config, original_shortcuts, sync_module, repairs=()):
+def install_app(tx, package, home, local, steam_config, original_shortcuts, sync_module, repairs=(), language=None):
     """Install the sync application; game-library management belongs to SRM."""
     for name in RUNTIME:
         tx.replace(local / name, (package / 'app' / name).read_bytes())
@@ -381,6 +382,10 @@ def install_app(tx, package, home, local, steam_config, original_shortcuts, sync
             tx.replace(local / 'art' / path.name, path.read_bytes())
     for name in ('LICENSE', 'VERSION'):
         tx.replace(local / name, (package / name).read_bytes())
+    if language is not None:
+        if language not in ('en', 'ru'):
+            raise SetupError('Unsupported interface language')
+        tx.replace(local / 'preferences.json', json_bytes({'language': language}))
     mode = ' sync' if sync_module == 'native_card.py' else ''
     script = '#!/bin/sh\nset -eu\nBASE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec /usr/bin/python3 "$BASE/' + sync_module + '"' + mode + ' "$@"\n'
     tx.replace(local / 'sync.sh', script.encode(), mode=0o755)
@@ -399,15 +404,15 @@ def install_app(tx, package, home, local, steam_config, original_shortcuts, sync
 def check_pending_setup(local):
     for pending in (local / 'backups').glob('*/transaction.json'):
         if card.read(pending)['status'] == 'in-progress':
-            raise SetupError('Interrupted setup: restore it first. / Восстанови прерванную установку: ' + str(pending.parent))
+            raise SetupError(tr('Interrupted setup: restore it first. / Восстанови прерванную установку: ') + str(pending.parent))
 
 
-def install_sync_only(package, home, source_root, steam_config=None, idle_check=None):
+def install_sync_only(package, home, source_root, steam_config=None, idle_check=None, language=None):
     """Add save sync to an existing Ryujinx setup without requiring a card/EmuDeck."""
     idle_check = idle_check or (lambda: require_idle(steam=steam_config is not None))
     idle_check()
     if not (source_root / 'Config.json').is_file() or not (source_root / 'bis/user/save').is_dir():
-        raise SetupError('Start Ryujinx once and select its data folder. / Один раз запусти Ryujinx и выбери его папку данных.')
+        raise SetupError(tr('Start Ryujinx once and select its data folder. / Один раз запусти Ryujinx и выбери его папку данных.'))
     local = home / '.local/share/switch-deck-sync'
     local.mkdir(parents=True, exist_ok=True, mode=0o700)
     if (home / '.config/systemd/user' / native_card.UNIT).exists() or legacy_migration.detect(home):
@@ -420,7 +425,7 @@ def install_sync_only(package, home, source_root, steam_config=None, idle_check=
     if data_dir.is_symlink():
         raise SetupError('Unexpected local sync data link')
     if (data_dir / 'pending.json').exists():
-        raise SetupError('Finish the interrupted sync before updating. / Сначала восстанови прерванную передачу.')
+        raise SetupError(tr('Finish the interrupted sync before updating. / Сначала восстанови прерванную передачу.'))
     settings_path = data_dir / 'settings.json'
     if settings_path.is_file() and Path(card.read(settings_path).get('ryujinx_dir', '')).absolute() != source_root.absolute():
         raise SetupError('Keep the same Ryujinx data folder when updating this installation.')
@@ -445,7 +450,7 @@ def install_sync_only(package, home, source_root, steam_config=None, idle_check=
             current = shortcut_path.read_bytes() if shortcut_path and shortcut_path.exists() else b''
             if current != original:
                 raise SetupError('Steam shortcuts changed during setup. Close Steam and retry.')
-            install_app(tx, package, home, local, steam_config, original, 'sync_launcher.py')
+            install_app(tx, package, home, local, steam_config, original, 'sync_launcher.py', language=language)
             tx.replace(info, json_bytes({'version': VERSION, 'architecture': 'sync-only',
                        'backup': str(tx.folder), 'source_root': str(source_root),
                        'steam_config': str(steam_config) if steam_config else None}))
@@ -467,7 +472,7 @@ def unit_contents(local):
 
 def install(package, home, mount, slot, executable, source_root, steam_config,
             mode='attach', rom_dirs=(), progress=lambda text: None, idle_check=require_idle,
-            service_start=None, service_stop=None):
+            service_start=None, service_stop=None, language=None):
     idle_check()
     service_start = native_card.start_service if service_start is None else service_start
     service_stop = native_card.stop_service if service_stop is None else service_stop
@@ -479,7 +484,7 @@ def install(package, home, mount, slot, executable, source_root, steam_config,
     try:
         with card.session_lock(local):
             result, tx, library_id = _install(package, home, mount, slot, executable, source_root,
-                                              steam_config, mode, rom_dirs, progress, idle_check, local)
+                                              steam_config, mode, rom_dirs, progress, idle_check, local, language)
         service_start(local, library_id)
         tx.commit()
         return result
@@ -498,15 +503,15 @@ def install(package, home, mount, slot, executable, source_root, steam_config,
 
 
 def _install(package, home, mount, slot, executable, source_root, steam_config,
-             mode, rom_dirs, progress, idle_check, local):
+             mode, rom_dirs, progress, idle_check, local, language=None):
     check_pending_setup(local)
     if mode not in ('attach', 'prepare'):
         raise SetupError('Unknown setup mode')
     if not mount.is_mount():
-        raise SetupError('Selected card is not mounted. / Карта не подключена.')
+        raise SetupError(tr('Selected card is not mounted. / Карта не подключена.'))
     roms, launcher = native_paths(home)
     if roms.resolve().is_relative_to(mount.resolve()):
-        raise SetupError('For portable cards, select Internal Storage in EmuDeck first. / Для сменных карт выбери Internal Storage в EmuDeck.')
+        raise SetupError(tr('For portable cards, select Internal Storage in EmuDeck first. / Для сменных карт выбери Internal Storage в EmuDeck.'))
     root = home / '.config/Ryujinx'
     if source_root.absolute() != root.absolute() or root.is_symlink():
         raise SetupError('Use the standard EmuDeck Ryujinx data folder. Portable/managed emulator roots are not supported.')
@@ -527,17 +532,17 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
     sync_source = local_data if previous and previous.get('architecture') == 'sync-only' and (local_data / 'settings.json').is_file() else None
     manifest = prepare_card(mount, source_root, rom_dirs, progress, sync_source) if mode == 'prepare' else card.validated_manifest(mount)
     if not (card.contained(mount, manifest['data_dir']) / 'system/prod.keys').is_file():
-        raise SetupError('The card has no dumped prod.keys. / На подготовленной карте отсутствуют ключи.')
+        raise SetupError(tr('The card has no dumped prod.keys. / На подготовленной карте отсутствуют ключи.'))
     firmware = card.contained(mount, manifest['data_dir']) / 'bis/system/Contents/registered'
     if not firmware.is_dir() or not any(firmware.iterdir()):
-        raise SetupError('The card has no installed firmware. / На карте отсутствует установленная прошивка.')
+        raise SetupError(tr('The card has no installed firmware. / На карте отсутствует установленная прошивка.'))
     catalog = card.catalog_games(mount, manifest)
     titles = [card.game_id(game) for game in catalog if card.game_id(game)]
     if len(titles) != len(set(titles)):
         raise SetupError('Multiple base games share a title ID. Keep one base file per game.')
     sync = card.contained(mount, manifest['sync_dir'])
     if (sync / 'pending.json').exists():
-        raise SetupError('Finish the interrupted sync on the previous computer first. / Сначала восстанови прерванную синхронизацию.')
+        raise SetupError(tr('Finish the interrupted sync on the previous computer first. / Сначала восстанови прерванную синхронизацию.'))
     migration = legacy_migration.plan(home, root, launcher, copy_tree, local, manifest['library_id'], progress)
     repairs = legacy_migration.shortcut_repairs(original_shortcuts, migration, launcher, roms, catalog)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:6]
@@ -563,7 +568,7 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
         current = (steam_config / 'shortcuts.vdf').read_bytes() if (steam_config / 'shortcuts.vdf').exists() else b''
         if current != original_shortcuts:
             raise SetupError('Steam shortcuts changed during setup. Close Steam and retry.')
-        install_app(tx, package, home, local, steam_config, original_shortcuts, 'native_card.py', repairs)
+        install_app(tx, package, home, local, steam_config, original_shortcuts, 'native_card.py', repairs, language=language)
         unit = home / '.config/systemd/user' / native_card.UNIT
         tx.replace(unit, unit_contents(local))
         tx.replace(unit.parent / 'default.target.wants' / native_card.UNIT, link=unit)

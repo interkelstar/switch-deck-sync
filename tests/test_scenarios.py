@@ -51,6 +51,18 @@ class StandaloneTests(ScenarioTests):
         entries = steam.decode((self.steam / 'shortcuts.vdf').read_bytes())['shortcuts']
         self.assertEqual([s['appname'] for s in entries.values()], ['Switch Deck Sync'])
 
+    def test_installer_language_is_host_local_and_updates_keep_sync_data(self):
+        setup.install_sync_only(PACKAGE, self.home, self.source, self.steam,
+                                idle_check=lambda: None, language='ru')
+        self.assertEqual(card.read(self.local/'preferences.json'), {'language':'ru'})
+        before = (self.local/'data/settings.json').read_bytes()
+        self.install_sync()
+        self.assertEqual(card.read(self.local/'preferences.json'), {'language':'ru'})
+        setup.install_sync_only(PACKAGE, self.home, self.source, self.steam,
+                                idle_check=lambda: None, language='en')
+        self.assertEqual(card.read(self.local/'preferences.json'), {'language':'en'})
+        self.assertEqual((self.local/'data/settings.json').read_bytes(), before)
+
     def test_update_and_restore_keep_sync_history_and_existing_steam_games(self):
         self.steam.mkdir(parents=True)
         existing = {'appname': 'Selected Emulator', 'exe': '/my/emulator', 'appid': 44, 'tags': {'0': 'mine'}}

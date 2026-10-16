@@ -1,4 +1,6 @@
 """Attach card data to stock EmuDeck paths. Never launch an emulator or map inputs."""
+from i18n import tr
+import i18n
 import json
 import os
 from pathlib import Path
@@ -32,7 +34,7 @@ def active_game(proc=Path('/proc')):
 
 def replace_link(path, target):
     if path.exists() and not path.is_symlink():
-        raise card.LibraryError('Путь подключения занят обычной папкой: ' + str(path))
+        raise card.LibraryError(tr('Путь подключения занят обычной папкой: ') + str(path))
     if path.is_symlink() and os.readlink(path) == str(target):
         return
     stage = path.with_name(path.name + '.' + uuid.uuid4().hex)
@@ -56,7 +58,7 @@ class DataManager:
     def status(self, state, **details):
         card.write_changed(self.local / 'native-status.json', {'state': state, **details})
 
-    def detach(self, state='absent', message='Вставь подготовленную карту в выбранный слот.'):
+    def detach(self, state='absent', message=tr('Вставь подготовленную карту в выбранный слот.')):
         # A file target makes attempts to create a fallback local save fail with
         # ENOTDIR, instead of silently building a second library without the card.
         replace_link(self.local / 'active', Path('/dev/null'))
@@ -72,20 +74,20 @@ class DataManager:
         for path, target in self.host['native_links'].items():
             p = Path(path)
             if not p.is_symlink() or os.readlink(p) != target:
-                raise card.LibraryError('EmuDeck изменил подключение папок. Повтори установку: ' + str(p))
+                raise card.LibraryError(tr('EmuDeck изменил подключение папок. Повтори установку: ') + str(p))
 
     def attach(self, mount, manifest, part):
         self.verify_links()
         shared = card.contained(mount, manifest['data_dir'])
         if not (shared / 'system/prod.keys').is_file():
-            raise card.LibraryError('На карте отсутствуют ключи Ryujinx.')
+            raise card.LibraryError(tr('На карте отсутствуют ключи Ryujinx.'))
         firmware = shared / 'bis/system/Contents/registered'
         if not firmware.is_dir() or not any(firmware.iterdir()):
-            raise card.LibraryError('На карте отсутствует установленная прошивка Ryujinx.')
+            raise card.LibraryError(tr('На карте отсутствует установленная прошивка Ryujinx.'))
         for parent, directories, files in os.walk(shared, followlinks=False):
             for name in directories + files:
                 if (Path(parent) / name).is_symlink():
-                    raise card.LibraryError('В данных профиля карты обнаружена ссылка. Нужны сами файлы данных.')
+                    raise card.LibraryError(tr('В данных профиля карты обнаружена ссылка. Нужны сами файлы данных.'))
         cache = self.local / 'libraries' / manifest['library_id'].lower() / 'games'
         cache.mkdir(parents=True, exist_ok=True)
         templates = manifest.get('game_metadata', {})
@@ -173,14 +175,14 @@ class DataManager:
                 return
             is_busy = active_game() if busy is None else busy
             if is_busy:
-                self.detach('busy', 'Закрой Ryujinx и синхронизацию перед сменой библиотеки.')
+                self.detach('busy', tr('Закрой Ryujinx и синхронизацию перед сменой библиотеки.'))
                 return
             self.attach(mount, manifest, part)
         except (card.LibraryError, OSError, ValueError) as ex:
             self.detach('absent' if isinstance(ex, card.LibraryError) else 'error', str(ex))
 
     def close(self):
-        self.detach('stopped', 'Служба подключения карты остановлена.')
+        self.detach('stopped', tr('Служба подключения карты остановлена.'))
 
 
 def systemctl(*args, check=True):
@@ -199,7 +201,7 @@ def start_service(local, expected_id):
         except (OSError, ValueError):
             pass
         time.sleep(0.25)
-    raise card.LibraryError('Не удалось подключить карту. Проверь, что она открывается в файловом менеджере, и повтори установку.')
+    raise card.LibraryError(tr('Не удалось подключить карту. Проверь, что она открывается в файловом менеджере, и повтори установку.'))
 
 
 def stop_service():
@@ -238,6 +240,7 @@ def watch(local=LOCAL):
 
 
 def run_sync(args, local=LOCAL):
+    i18n.load_language(local / 'preferences.json')
     from switch_save_sync import ensure_idle
     ensure_idle()
     host = card.read(local / 'host.json')
@@ -245,11 +248,11 @@ def run_sync(args, local=LOCAL):
         mount, manifest, _ = card.locate(host)
         status = card.read(local / 'native-status.json')
         if status.get('state') != 'ready' or status.get('library_id') != manifest['library_id'] or status.get('mount') != str(mount):
-            raise card.LibraryError('Карта ещё не подключена. Закрой игры и повтори запуск через секунду.')
+            raise card.LibraryError(tr('Карта ещё не подключена. Закрой игры и повтори запуск через секунду.'))
         if not (local / 'active').resolve().is_dir():
-            raise card.LibraryError('Карта ещё не подключена. Повтори запуск через секунду.')
+            raise card.LibraryError(tr('Карта ещё не подключена. Повтори запуск через секунду.'))
         if not (Path(host['ryujinx_dir']) / 'bis').resolve().is_relative_to(mount.resolve()):
-            raise card.LibraryError('Подключена другая библиотека. Закрой игры и подожди подключения карты.')
+            raise card.LibraryError(tr('Подключена другая библиотека. Закрой игры и подожди подключения карты.'))
         from sync_launcher import launch
         return launch(local / 'active/sync', args, local, portable=True)
 
@@ -268,7 +271,7 @@ def main(args=None):
     if mode == 'status':
         print(json.dumps(card.read(LOCAL / 'native-status.json'), ensure_ascii=False))
         return 0
-    raise card.LibraryError('Неизвестное действие подключения карты.')
+    raise card.LibraryError(tr('Неизвестное действие подключения карты.'))
 
 
 if __name__ == '__main__':
