@@ -10,6 +10,7 @@ from unittest.mock import patch
 import i18n
 import sync_config
 import switch_save_sync
+import sync_ui
 
 
 class LanguageTests(unittest.TestCase):
@@ -79,3 +80,9 @@ class LanguageTests(unittest.TestCase):
         self.assertEqual(i18n.tr(message), 'Exit Steam, then continue.')
         i18n.set_language('ru')
         self.assertEqual(i18n.tr(message), 'Заверши Steam и продолжи установку.')
+
+    def test_runtime_only_sdl_package_names_are_detected(self):
+        values = {'SDL2-2.0':'libSDL2-2.0.so.0', 'SDL2_ttf-2.0':'libSDL2_ttf-2.0.so.0'}
+        with patch.object(sync_ui.ctypes.util, 'find_library', side_effect=values.get):
+            self.assertEqual(sync_ui.sdl_library('SDL2'), values['SDL2-2.0'])
+            self.assertEqual(sync_ui.sdl_library('SDL2_ttf'), values['SDL2_ttf-2.0'])

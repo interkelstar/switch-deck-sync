@@ -38,7 +38,7 @@ def renderer_png(renderer, sdl):
 
 class InterfaceSmokeTests(unittest.TestCase):
     def test_english_and_russian_screens_navigation_and_language_persistence(self):
-        available = os.environ.get('DISPLAY') and ctypes.util.find_library('SDL2') and ctypes.util.find_library('SDL2_ttf')
+        available = os.environ.get('DISPLAY') and sync_ui.sdl_library('SDL2') and sync_ui.sdl_library('SDL2_ttf')
         if os.environ.get('SDS_REQUIRE_UI_TESTS'):
             self.assertTrue(available, 'The Linux acceptance job must supply SDL2, fonts and Xvfb')
         elif not available:

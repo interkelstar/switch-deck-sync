@@ -1,5 +1,4 @@
 """KDE Desktop Mode setup wizard. All dialogs are provided by kdialog."""
-import ctypes.util
 import json
 import locale
 import os
@@ -14,6 +13,7 @@ import card_library as card
 import setup_library as setup
 import native_card
 import i18n
+import sync_ui
 
 
 class Cancelled(Exception):
@@ -77,7 +77,7 @@ class Wizard:
 
     def dependencies(self, portable=False):
         missing = [name for name in ('lsblk', 'udisksctl', 'systemctl') if not shutil.which(name)] if portable else []
-        missing += [name for name in ('SDL2', 'SDL2_ttf') if not ctypes.util.find_library(name)]
+        missing += [name for name in ('SDL2', 'SDL2_ttf') if not sync_ui.sdl_library(name)]
         fonts = Path('/usr/share/fonts')
         if not any(fonts.rglob('DejaVuSans.ttf')):
             missing.append('DejaVu Sans')

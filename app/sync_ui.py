@@ -15,13 +15,17 @@ class Rect(C.Structure):
 class Color(C.Structure):
     _fields_ = [('r', C.c_uint8), ('g', C.c_uint8), ('b', C.c_uint8), ('a', C.c_uint8)]
 
+def sdl_library(name):
+    # Runtime-only Debian/Ubuntu packages use versioned names in ldconfig.
+    return ctypes.util.find_library(name) or ctypes.util.find_library(name + '-2.0')
+
 def run_gui(check=False, *, frame_hook=None):
     import switch_save_sync as core
     os.environ['SDL_VIDEODRIVER'] = 'x11'
     appid = os.environ.get('SteamAppId')
     os.environ['SDL_VIDEO_X11_WMCLASS'] = ('steam_app_' + appid) if appid else 'SwitchDeckSync'
-    sdl = C.CDLL(ctypes.util.find_library('SDL2'))
-    ttf = C.CDLL(ctypes.util.find_library('SDL2_ttf'))
+    sdl = C.CDLL(sdl_library('SDL2'))
+    ttf = C.CDLL(sdl_library('SDL2_ttf'))
     def bind(lib, name, restype, args):
         fn = getattr(lib, name);fn.restype = restype;fn.argtypes = args;return fn
     P=C.c_void_p;I=C.c_int;U=C.c_uint32;S=C.c_char_p
