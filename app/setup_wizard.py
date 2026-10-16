@@ -250,13 +250,17 @@ class Wizard:
         installation = self.home / '.local/share/switch-deck-sync/installation.json'
         info = card.read(installation) if installation.is_file() else None
         if info:
-            choices = [('install', self.t('Update current installation', 'Обновить текущую установку')),
-                       ('artwork', self.t('Transfer SRM artwork', 'Перенести обложки SRM')),
-                       ('restore', self.t('Restore the previous settings', 'Восстановить прежние настройки'))]
-            if info.get('architecture') == 'sync-only':
-                choices.append(('portable', self.t('Set up a portable card library', 'Настроить переносимую библиотеку на карте')))
+            portable = info.get('architecture') == 'native-emudeck'
+            update = self.t('Update save sync — portable library enabled', 'Обновить синхронизацию — используется переносимая библиотека') if portable else self.t('Update save sync', 'Обновить синхронизацию')
+            choices = [('install', update), ('more', self.t('Other actions…', 'Другие действия…'))]
             action = self.choose(self.t('Choose an action', 'Выбери действие'),
                                  choices)
+            if action == 'more':
+                choices = [('artwork', self.t('Transfer SRM artwork', 'Перенести обложки SRM')),
+                           ('restore', self.t('Restore the previous settings', 'Восстановить прежние настройки'))]
+                if not portable:
+                    choices.append(('portable', self.t('Set up a portable card library', 'Настроить переносимую библиотеку на карте')))
+                action = self.choose(self.t('Other actions', 'Другие действия'), choices)
             if action == 'restore':
                 self.restore_previous()
                 return
@@ -266,7 +270,7 @@ class Wizard:
             operation = self.choose(self.t('What would you like to set up?', 'Что настроить?'), [
                 ('sync', self.t('Sync saves with Switch', 'Обмен сейвами со Switch')),
                 ('portable', self.t('Portable library on a memory card', 'Переносимую библиотеку на карте памяти')),
-                ('artwork', self.t('Transfer SRM artwork', 'Перенести обложки SRM'))])
+                ('artwork', self.t('Other actions: transfer SRM artwork', 'Другие действия: перенести обложки SRM'))])
         if action == 'artwork' or operation == 'artwork':
             self.artwork()
             return
@@ -297,10 +301,9 @@ class Wizard:
                                    ([(options, use_all + ': ' + ', '.join(map(str, options)))] if options else []) + [(None, self.t('Browse…', 'Выбрать папку…'))])
             rom_dirs = selected or [self.directory(self.t('Folder with your Switch games', 'Папка с твоими играми Switch'), mount)]
         steam_config = self.steam_profile()
-        count = len(card.catalog_games(mount, manifest)) if ready else self.t('from selected folders', 'из выбранных папок')
-        details = self.t('Connect existing card', 'Подключить готовую карту') if ready else self.t('Copy and verify data; originals are retained', 'Скопировать и проверить данные; оригиналы сохраняются')
-        self.dialog('--yesno', self.t('Install Switch Deck Sync?', 'Установить Switch Deck Sync?') + '\n\n' +
-                    details + '\n' + str(mount) + '\n' + self.t('Games: ', 'Игры: ') + str(count) + '\n\n' +
+        details = self.t('Save sync uses saves and settings from this portable library:', 'Синхронизация использует сейвы и настройки из этой переносимой библиотеки:') if ready else self.t('Copy and verify data; originals are retained', 'Скопировать и проверить данные; оригиналы сохраняются')
+        title = self.t('Update Switch Deck Sync?', 'Обновить Switch Deck Sync?') if info and action == 'install' else self.t('Install Switch Deck Sync?', 'Установить Switch Deck Sync?')
+        self.dialog('--yesno', title + '\n\n' + details + '\n' + str(mount) + '\n\n' +
                     self.t('Switch Deck Sync will appear in Steam. Add games and artwork using Steam ROM Manager.',
                            'В Steam появится Switch Deck Sync. Игры и обложки добавляй через Steam ROM Manager.'))
         self.close_steam()
