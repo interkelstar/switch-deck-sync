@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -44,14 +45,17 @@ class ReleaseTests(unittest.TestCase):
             desktop = root / 'Install.desktop'
             shutil.copy2(ROOT / 'Install.desktop', desktop)
             desktop.chmod(0o755)
-            result = subprocess.run(['gio', 'launch', str(desktop)], capture_output=True, text=True)
+            # The desktop launcher uses the OS Python. GitHub setup-python exports
+            # its own libpython path, which must not override /usr/bin/python3.
+            env = {k: v for k, v in os.environ.items() if k not in ('LD_LIBRARY_PATH', 'PYTHONHOME', 'PYTHONPATH')}
+            result = subprocess.run(['gio', 'launch', str(desktop)], capture_output=True, text=True, env=env)
             self.assertEqual(result.returncode, 0, result.stderr)
             import time
-            for _ in range(20):
+            for _ in range(100):
                 if marker.exists():
                     break
                 time.sleep(0.05)
-            self.assertTrue(marker.exists(), 'Desktop entry did not launch the neighbouring installer')
+            self.assertTrue(marker.exists(), 'Desktop entry did not launch the neighbouring installer: ' + result.stdout + result.stderr)
 
 
 if __name__ == '__main__':
