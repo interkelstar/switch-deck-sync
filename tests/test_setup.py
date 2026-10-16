@@ -12,6 +12,8 @@ import card_library as card
 import setup_library as setup
 import steam_shortcuts as steam
 import setup_wizard
+import native_card
+import shlex
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -32,6 +34,18 @@ class SetupTests(unittest.TestCase):
         self.local = self.home / '.local/share/switch-deck-sync'
         self.steam = self.home / '.local/share/Steam/userdata/123/config'
         self.source.mkdir(parents=True)
+        self.manager = None
+        self.emu = self.home / 'Emulation'
+        self.launcher = self.emu / 'tools/launchers/ryujinx.sh'
+        self.launcher.parent.mkdir(parents=True)
+        (self.emu / 'roms/switch').mkdir(parents=True)
+        put(self.home / '.config/steam-rom-manager/userData/userSettings.json',
+            {'environmentVariables': {'romsDirectory': str(self.emu / 'roms')}})
+        backend = self.home / '.config/EmuDeck/backend/functions/EmuScripts'
+        backend.mkdir(parents=True)
+        (backend / 'emuDeckRyujinx.sh').write_text('# fixture stock backend\n')
+        self.settings = self.home / '.config/EmuDeck/settings.sh'
+        self.settings.write_text('autoMapSwitch="false"\n')
         put(self.source / 'Config.json', {'game_dirs': [], 'input_config': [{'gyro': 'host gyro'}]})
         for name in setup.SHARED:
             (self.source / name).mkdir()
@@ -46,11 +60,34 @@ class SetupTests(unittest.TestCase):
         (self.roms / 'Fixture [0000000000001000].xci').write_bytes(b'fake game')
         self.exe = self.home / 'Applications/Ryujinx'
         self.exe.parent.mkdir()
-        self.exe.write_text('#!/usr/bin/python3\nimport json,sys\nfrom pathlib import Path\nroot=Path(sys.argv[sys.argv.index("--root-data-dir")+1])\n(root/"executed.json").write_text(json.dumps({"argv":sys.argv[1:],"profile":(root/"system/Profiles.json").read_text()}))\n')
+        self.exe.write_text('#!/usr/bin/python3\nimport json,sys\nfrom pathlib import Path\nroot=Path(' + repr(str(self.source)) + ')\n'
+                            'config=json.loads((root/"Config.json").read_text())\n'
+                            'if \'autoMapSwitch="true"\' in Path(' + repr(str(self.settings)) + ').read_text():\n'
+                            ' config["input_config"]=[{"name":"mapped by stock launcher fixture"}]\n'
+                            ' (root/"Config.json").write_text(json.dumps(config))\n'
+                            '(root/"executed.json").write_text(json.dumps({"argv":sys.argv[1:],"profile":(root/"system/Profiles.json").read_text(),"controls":config["input_config"]}))\n')
         self.exe.chmod(0o755)
+        self.launcher.write_text('#!/bin/sh\nexec ' + shlex.quote(str(self.exe)) + ' "$@"\n')
+        self.launcher.chmod(0o755)
 
     def tearDown(self):
+        self.stop_data()
         self.temp.cleanup()
+
+    def devices(self, mount=None):
+        return [{'name': 'mmcblk0', 'path': '/dev/mmcblk0', 'type': 'disk', 'tran': 'mmc',
+                 'children': [{'path': '/dev/mmcblk0p1', 'type': 'part', 'fstype': 'ext4',
+                               'uuid': 'not-registered', 'mountpoints': [str(mount or self.mount)]}]}]
+
+    def stop_data(self):
+        if self.manager:
+            self.manager.close()
+            self.manager = None
+
+    def start_data(self, local, library_id):
+        self.manager = native_card.DataManager(card.read(local / 'host.json'), local)
+        self.manager.tick(devices=self.devices(), busy=False, allow_mount=False)
+        self.assertEqual(card.read(local / 'native-status.json')['state'], 'ready')
 
     def prepare(self):
         return setup.prepare_card(self.mount, self.source, [self.roms])
@@ -58,14 +95,15 @@ class SetupTests(unittest.TestCase):
     def install(self, **kwargs):
         with patch.object(Path, 'is_mount', return_value=True):
             return setup.install(PACKAGE, self.home, self.mount, {'kind': 'mmc'}, self.exe,
-                                 self.source, self.steam, idle_check=lambda: None, **kwargs)
+                                 self.source, self.steam, idle_check=lambda: None,
+                                 service_start=self.start_data, service_stop=self.stop_data, **kwargs)
 
     def test_fresh_preparation_and_attach_leave_originals_untouched(self):
-        before = {p.relative_to(self.source): p.read_bytes() for p in self.source.rglob('*') if p.is_file()}
+        before = card.read(self.source / 'Config.json')['input_config']
         self.install(mode='prepare', rom_dirs=[self.roms])
-        self.assertEqual(before, {p.relative_to(self.source): p.read_bytes() for p in self.source.rglob('*') if p.is_file()})
+        self.assertEqual(before, card.read(self.source / 'Config.json')['input_config'])
         self.assertTrue((self.roms / 'Fixture [0000000000001000].xci').exists())
-        root = self.local / 'ryujinx'
+        root = self.source
         self.assertEqual(card.read(root / 'Config.json')['input_config'], [{'gyro': 'host gyro'}])
         self.assertTrue((root / 'bis').is_symlink())
         self.assertEqual((root / 'system').resolve(), self.mount / 'Emulation/storage/ryujinx/data/system')
@@ -75,8 +113,11 @@ class SetupTests(unittest.TestCase):
         self.prepare()
         put(self.source / 'system/Profiles.json', {'profiles': [{'name': 'Different Host User'}]})
         self.install()
-        self.assertEqual(card.read(self.local / 'ryujinx/system/Profiles.json')['profiles'][0]['name'], 'Fixture User')
-        self.assertEqual(card.read(self.source / 'system/Profiles.json')['profiles'][0]['name'], 'Different Host User')
+        self.assertEqual(card.read(self.source / 'system/Profiles.json')['profiles'][0]['name'], 'Fixture User')
+        backup = Path(card.read(self.local / 'installation.json')['backup'])
+        journal = card.read(backup / 'transaction.json')
+        entry = next(i for i in journal['items'] if i['path'] == str(self.source / 'system'))
+        self.assertEqual(card.read(backup / entry['backup'] / 'Profiles.json')['profiles'][0]['name'], 'Different Host User')
 
     def test_repeat_install_preserves_state_saves_and_steam_ids(self):
         manifest = self.prepare()
@@ -119,14 +160,50 @@ class SetupTests(unittest.TestCase):
         script = tools / 'lsblk'
         script.write_text('#!/usr/bin/python3\nprint(' + repr(json.dumps(inventory)) + ')\n')
         script.chmod(0o755)
-        result = subprocess.run([sys.executable, str(self.local / 'card_library.py'), 'emulator', '--fullscreen',
-                                 '--game', '0000000000001000'], env=dict(os.environ, PATH=str(tools) + ':/usr/bin:/bin'),
+        result = subprocess.run([str(self.launcher), '--fullscreen', str(self.emu / 'roms/switch/Fixture [0000000000001000].xci')],
+                                env=dict(os.environ, PATH=str(tools) + ':/usr/bin:/bin'),
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        executed = card.read(self.local / 'ryujinx/executed.json')
-        self.assertEqual(executed['argv'][0:2], ['--root-data-dir', str(self.local / 'ryujinx')])
+        executed = card.read(self.source / 'executed.json')
+        self.assertNotIn('--root-data-dir', executed['argv'])
         self.assertIn('Fixture User', executed['profile'])
         self.assertEqual(Path(executed['argv'][-1]).read_bytes(), b'fake game')
+
+    def test_game_shortcuts_use_untouched_stock_launcher_and_no_custom_game_wrapper(self):
+        original = self.launcher.read_bytes()
+        self.prepare()
+        self.install()
+        shortcuts = steam.decode((self.steam / 'shortcuts.vdf').read_bytes())['shortcuts']
+        for value in shortcuts.values():
+            if value['appname'] != 'Switch Deck Sync':
+                self.assertEqual(value['exe'], '"' + str(self.launcher) + '"')
+                self.assertNotIn('--root-data-dir', value['LaunchOptions'])
+        self.assertEqual(self.launcher.read_bytes(), original)
+        self.assertFalse((self.local / 'ryujinx.sh').exists())
+        self.assertFalse((self.local / 'ryujinx').exists())
+        self.assertNotIn('emulator_executable', card.read(self.local / 'host.json'))
+
+    def test_stock_automap_disabled_and_enabled_are_both_owned_by_native_launcher(self):
+        self.prepare()
+        self.install()
+        for enabled in (False, True):
+            settings = 'autoMapSwitch="' + str(enabled).lower() + '"\n'
+            self.settings.write_text(settings)
+            result = subprocess.run([str(self.launcher)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            controls = card.read(self.source / 'executed.json')['controls']
+            self.assertEqual(controls, [{'name': 'mapped by stock launcher fixture'}] if enabled else [{'gyro': 'host gyro'}])
+            self.assertEqual(self.settings.read_text(), settings)
+
+    def test_service_start_failure_rolls_back_real_directories_and_config(self):
+        self.prepare()
+        original = (self.source / 'Config.json').read_bytes()
+        with patch.object(self, 'start_data', side_effect=OSError('service start failed')), self.assertRaises(OSError):
+            self.install()
+        self.assertEqual((self.source / 'Config.json').read_bytes(), original)
+        self.assertFalse((self.source / 'bis').is_symlink())
+        self.assertFalse((self.emu / 'roms/switch').is_symlink())
+        self.assertFalse((self.home / '.config/systemd/user' / native_card.UNIT).exists())
 
     def test_update_dlc_outside_card_are_copied_and_paths_portable(self):
         patchfile = self.base / 'DLC same name.nsp'
@@ -171,6 +248,7 @@ class SetupTests(unittest.TestCase):
     def test_explicit_restore_keeps_card_data(self):
         self.prepare()
         result = self.install()
+        self.stop_data()
         setup.restore(Path(result['backup']))
         self.assertFalse((self.local / 'host.json').exists())
         self.assertTrue((self.mount / 'Emulation/storage/ryujinx/data/system/prod.keys').exists())
@@ -219,9 +297,13 @@ class SetupTests(unittest.TestCase):
 
         devices = [{'name': 'mmcblk0', 'path': '/dev/mmcblk0', 'type': 'disk', 'tran': 'mmc', 'size': '64G',
                     'children': [{'path': '/dev/mmcblk0p1', 'type': 'part', 'fstype': 'ext4', 'mountpoints': [str(self.mount)]}]}]
+        original_install = setup.install
+        def install_ui(*args, **kwargs):
+            return original_install(*args, **kwargs, service_start=self.start_data, service_stop=self.stop_data)
         with patch.object(wizard, 'dialog', side_effect=reply), patch.object(wizard, 'dependencies'), \
                 patch.object(wizard, 'close_steam'), patch.object(card, 'block_devices', return_value=devices), \
-                patch.object(Path, 'is_mount', return_value=True), patch.object(setup_wizard.shutil, 'which', return_value=None):
+                patch.object(Path, 'is_mount', return_value=True), patch.object(setup_wizard.shutil, 'which', return_value=None), \
+                patch.object(setup, 'install', side_effect=install_ui):
             wizard.run()
         self.assertTrue((self.local / 'host.json').exists())
         self.assertTrue((self.steam / 'shortcuts.vdf').exists())

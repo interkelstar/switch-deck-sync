@@ -12,6 +12,7 @@ import time
 
 import card_library as card
 import setup_library as setup
+import native_card
 
 
 class Cancelled(Exception):
@@ -72,7 +73,7 @@ class Wizard:
         self.progress_address = None
 
     def dependencies(self):
-        missing = [name for name in ('lsblk', 'udisksctl') if not shutil.which(name)]
+        missing = [name for name in ('lsblk', 'udisksctl', 'systemctl') if not shutil.which(name)]
         missing += [name for name in ('SDL2', 'SDL2_ttf') if not ctypes.util.find_library(name)]
         fonts = Path('/usr/share/fonts')
         if not any(fonts.rglob('DejaVuSans.ttf')):
@@ -151,9 +152,13 @@ class Wizard:
             return
         self.dialog('--msgbox', self.t('A previous setup was interrupted. Its changes will be rolled back before retrying.', 'Предыдущая установка прервалась. Сначала восстановим прежние настройки.'))
         self.close_steam()
+        native_card.stop_service()
         with card.session_lock(local):
             for folder in sorted(pending, reverse=True):
                 setup.restore(folder)
+        native_card.systemctl('daemon-reload')
+        if (self.home / '.config/systemd/user' / native_card.UNIT).is_file():
+            native_card.systemctl('restart', native_card.UNIT)
 
     def restore_previous(self):
         local = self.home / '.local/share/switch-deck-sync'
@@ -161,9 +166,13 @@ class Wizard:
         folder = Path(info['backup'])
         self.dialog('--yesno', self.t('Restore settings and Steam shortcuts from before the last installation? Card games and saves will be retained.', 'Восстановить настройки и ярлыки Steam до последней установки? Игры и сейвы на карте сохранятся.'))
         self.close_steam()
+        native_card.stop_service()
         try:
             with card.session_lock(local):
                 setup.restore(folder)
+            native_card.systemctl('daemon-reload')
+            if (self.home / '.config/systemd/user' / native_card.UNIT).is_file():
+                native_card.systemctl('restart', native_card.UNIT)
         finally:
             if shutil.which('steam'):
                 subprocess.Popen(['steam'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -173,8 +182,8 @@ class Wizard:
         self.dependencies()
         self.ru = self.choose('Language / Язык', [(False, 'English'), (True, 'Русский')])
         self.dialog('--msgbox', self.t(
-            'Connect an existing Switch library card, or prepare one using your own Ryujinx games, keys and firmware. No formatting or administrator password is needed. This preview supports native Ryujinx and Ryujinx AppImage.',
-            'Подключи готовую карту Switch или подготовь библиотеку из своих игр, ключей и прошивки Ryujinx. Форматирование и пароль администратора не нужны. Эта версия поддерживает обычный Ryujinx и Ryujinx AppImage.'))
+            'Connect your card to the existing EmuDeck Ryujinx setup. Games keep using the stock EmuDeck launcher and controller settings. No formatting or administrator password is needed.',
+            'Подключи карту к установленному через EmuDeck Ryujinx. Игры будут запускаться обычным способом через EmuDeck с его настройками управления. Форматирование и пароль администратора не нужны.'))
         self.recover()
         if (self.home / '.local/share/switch-deck-sync/installation.json').is_file():
             action = self.choose(self.t('Choose an action', 'Выбери действие'),
@@ -192,16 +201,10 @@ class Wizard:
             mode = self.choose(self.t('This card has no portable library yet', 'На карте пока нет переносимой библиотеки'),
                                [('prepare', self.t('Prepare from my Ryujinx installation', 'Подготовить из моей установки Ryujinx'))])
             manifest = None
-        executables = setup.emulator_executables(self.home)
-        executable = self.choose(self.t('Ryujinx executable', 'Сам эмулятор Ryujinx'),
-                                 [(p, str(p)) for p in executables] + [(None, self.t('Browse…', 'Выбрать файл…'))])
-        if executable is None:
-            executable = self.file(self.t('Select Ryujinx or its AppImage', 'Выбери Ryujinx или его AppImage'), self.home / 'Applications')
-        roots = setup.emulator_roots(self.home)
-        root = self.choose(self.t('Existing Ryujinx data folder (for this computer’s controls)', 'Папка данных Ryujinx (для настроек управления этого компьютера)'),
-                           [(p, str(p)) for p in roots] + [(None, self.t('Browse…', 'Выбрать папку…'))])
-        if root is None:
-            root = self.directory('Ryujinx — Config.json', self.home / '.config')
+        roms, executable = setup.native_paths(self.home)
+        root = self.home / '.config/Ryujinx'
+        if not (root / 'Config.json').is_file():
+            raise setup.SetupError(self.t('Start and close Ryujinx once from the application menu, then retry.', 'Один раз открой и закрой Ryujinx через меню приложений, затем повтори установку.'))
         config = card.read(root / 'Config.json')
         rom_dirs = []
         if mode == 'prepare':
@@ -216,7 +219,7 @@ class Wizard:
         details = self.t('Connect existing card', 'Подключить готовую карту') if ready else self.t('Copy and verify data; originals are retained', 'Скопировать и проверить данные; оригиналы сохраняются')
         self.dialog('--yesno', self.t('Install with these settings?', 'Установить с этими настройками?') + '\n\n' +
                     details + '\n' + str(mount) + '\nRyujinx: ' + str(executable) + '\n' +
-                    self.t('Games: ', 'Игры: ') + str(count) + '\n\n' + self.t('A separate local Ryujinx configuration and Steam shortcuts will be created.', 'Будут созданы отдельные локальные настройки Ryujinx и ярлыки Steam.'))
+                    self.t('Games: ', 'Игры: ') + str(count) + '\n\n' + self.t('EmuDeck keeps its launcher, controls and graphics. A background data service and direct Steam shortcuts will be installed. Existing folders will be kept for restore.', 'Запуск, управление и графика останутся у EmuDeck. Добавятся фоновое подключение данных карты и прямые ярлыки Steam. Прежние папки сохранятся для восстановления.'))
         self.close_steam()
         self.busy()
         try:

@@ -7,14 +7,16 @@ from pathlib import Path
 import re
 import shutil
 import stat
+import shlex
 import uuid
 
 import card_library as card
 import steam_shortcuts
+import native_card
 
-VERSION = '0.2.0-preview'
+VERSION = '0.3.0-preview'
 SHARED = ('bis', 'system', 'mods', 'sdcard')
-RUNTIME = ('card_library.py', 'switch_save_sync.py', 'sync_config.py', 'sync_ui.py',
+RUNTIME = ('card_library.py', 'native_card.py', 'switch_save_sync.py', 'sync_config.py', 'sync_ui.py',
            'setup_library.py', 'setup_wizard.py', 'steam_shortcuts.py')
 
 
@@ -136,6 +138,24 @@ class Transaction:
         self.status = 'complete'
         self.save()
 
+    def redirect(self, path, target):
+        """Keep existing real directories by rename, then install a data link."""
+        path = Path(path).absolute()
+        if not path.is_dir() or path.is_symlink():
+            return self.replace(path, link=target)
+        if path.stat().st_dev != self.folder.stat().st_dev:
+            raise SetupError('Cannot safely back up a directory on another filesystem: ' + str(path))
+        if any(i['path'] == str(path) for i in self.items):
+            raise SetupError('Duplicate transaction target: ' + str(path))
+        backup = self.folder / ('original-' + str(len(self.items)))
+        self.items.append({'path': str(path), 'backup': backup.name, 'directory': True})
+        self.save()
+        path.rename(backup)
+        sync_dir(path.parent)
+        sync_dir(self.folder)
+        path.symlink_to(target, target_is_directory=True)
+        sync_dir(path.parent)
+
     def rollback(self):
         restore(self.folder)
         self.status = 'rolled-back'
@@ -146,6 +166,19 @@ def restore(folder):
     journal = card.read(folder / 'transaction.json')
     for item in reversed(journal['items']):
         path = Path(item['path'])
+        if item.get('directory'):
+            backup = folder / item['backup']
+            if backup.exists():
+                if path.is_symlink():
+                    path.unlink()
+                elif path.exists():
+                    raise SetupError('Refusing to overwrite a new directory during restore: ' + str(path))
+                backup.rename(path)
+                sync_dir(path.parent)
+                sync_dir(folder)
+            elif not path.is_dir() or path.is_symlink():
+                raise SetupError('Directory backup is unavailable: ' + str(path))
+            continue
         if path.is_dir() and not path.is_symlink():
             raise SetupError('Restore target is now a directory: ' + str(path))
         backup = folder / item['backup'] if item['backup'] else None
@@ -310,15 +343,75 @@ def quoted_exec(path):
     return '"' + str(path).replace('\\', '\\\\').replace('"', '\\"').replace('`', '\\`').replace('$', '\\$').replace('%', '%%') + '"'
 
 
+def native_paths(home):
+    """Read path fields only; never execute or print EmuDeck's shell settings."""
+    settings = home / '.config/steam-rom-manager/userData/userSettings.json'
+    value = card.read(settings).get('environmentVariables', {}).get('romsDirectory') if settings.is_file() else None
+    if not value:
+        shell = home / '.config/EmuDeck/settings.sh'
+        values = {'HOME': str(home)}
+        if shell.is_file():
+            for line in shell.read_text().splitlines():
+                match = re.match(r'^(?:export\s+)?(emulationPath|romsPath)=(.*)$', line.strip())
+                if not match:
+                    continue
+                tokens = shlex.split(match[2], comments=True)
+                if len(tokens) != 1 or '`' in tokens[0] or '$(' in tokens[0]:
+                    raise SetupError('Unsupported EmuDeck library path; open EmuDeck and finish setup first.')
+                text = tokens[0]
+                for key, replacement in values.items():
+                    text = text.replace('${' + key + '}', replacement).replace('$' + key, replacement)
+                values[match[1]] = text
+        value = values.get('romsPath') or (str(Path(values['emulationPath']) / 'roms') if values.get('emulationPath') else None)
+    if not value or '$' in value or not Path(value).is_absolute():
+        raise SetupError('Install EmuDeck and Steam ROM Manager first. / Сначала заверши установку EmuDeck.')
+    roms = Path(value)
+    launcher = roms.parent / 'tools/launchers/ryujinx.sh'
+    backend = home / '.config/EmuDeck/backend'
+    if not launcher.is_file() or not (backend / 'functions/EmuScripts/emuDeckRyujinx.sh').is_file():
+        raise SetupError('The stock EmuDeck Ryujinx launcher is missing. Install Ryujinx through EmuDeck first.')
+    return roms, launcher
+
+
+def unit_contents(local):
+    # systemd quoting is not shell quoting. Double percent signs are literals.
+    path = str(local / 'native_card.py').replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%')
+    return ('[Unit]\nDescription=Switch Deck Sync card data attachment\n'
+            '[Service]\nType=simple\nExecStart=/usr/bin/python3 "' + path + '" watch\n'
+            'ExecStopPost=/usr/bin/python3 "' + path + '" detach\nRestart=on-failure\nRestartSec=1\n'
+            'UMask=0077\n[Install]\nWantedBy=default.target\n').encode()
+
+
 def install(package, home, mount, slot, executable, source_root, steam_config,
-            mode='attach', rom_dirs=(), progress=lambda text: None, idle_check=require_idle):
+            mode='attach', rom_dirs=(), progress=lambda text: None, idle_check=require_idle,
+            service_start=None, service_stop=None):
     idle_check()
+    service_start = native_card.start_service if service_start is None else service_start
+    service_stop = native_card.stop_service if service_stop is None else service_stop
     local = home / '.local/share/switch-deck-sync'
     local.mkdir(parents=True, exist_ok=True)
-    # Protect installation against a concurrent managed emulator/session and another installer.
-    with card.session_lock(local):
-        return _install(package, home, mount, slot, executable, source_root, steam_config,
-                        mode, rom_dirs, progress, idle_check, local)
+    previous_unit = (home / '.config/systemd/user' / native_card.UNIT).is_file()
+    service_stop()
+    tx = None
+    try:
+        with card.session_lock(local):
+            result, tx, library_id = _install(package, home, mount, slot, executable, source_root,
+                                              steam_config, mode, rom_dirs, progress, idle_check, local)
+        service_start(local, library_id)
+        tx.commit()
+        return result
+    except BaseException:
+        service_stop()
+        if tx is not None:
+            with card.session_lock(local):
+                tx.rollback()
+        if previous_unit:
+            try:
+                native_card.systemctl('daemon-reload')
+                native_card.systemctl('restart', native_card.UNIT)
+            except (OSError, native_card.subprocess.SubprocessError):
+                pass
+        raise
 
 
 def _install(package, home, mount, slot, executable, source_root, steam_config,
@@ -330,25 +423,35 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
         raise SetupError('Unknown setup mode')
     if not mount.is_mount():
         raise SetupError('Selected card is not mounted. / Карта не подключена.')
-    if not executable.is_file() or not os.access(executable, os.X_OK):
-        raise SetupError('Select the native Ryujinx executable or AppImage.')
-    if executable.suffix.lower() in ('.sh', '.desktop') or executable.is_relative_to(local):
-        raise SetupError('Select Ryujinx itself, not a launcher. / Нужен сам эмулятор, не ярлык.')
-    source_config = card.read(source_root / 'Config.json')
-    # Validate Steam before copying large files or publishing a new card.
+    roms, launcher = native_paths(home)
+    if roms.resolve().is_relative_to(mount.resolve()):
+        raise SetupError('For portable cards, select Internal Storage in EmuDeck first. / Для сменных карт выбери Internal Storage в EmuDeck.')
+    root = home / '.config/Ryujinx'
+    if source_root.absolute() != root.absolute() or root.is_symlink():
+        raise SetupError('Use the standard EmuDeck Ryujinx data folder. Portable/managed emulator roots are not supported.')
+    if (local / 'installation.json').is_file():
+        previous = card.read(local / 'installation.json')
+        if previous.get('architecture') != 'native-emudeck':
+            raise SetupError('Restore the older custom-launcher installation before installing this version.')
+    source_config = card.read(root / 'Config.json')
+    if not isinstance(source_config, dict):
+        raise SetupError('Invalid Ryujinx configuration')
     original_shortcuts = (steam_config / 'shortcuts.vdf').read_bytes() if (steam_config / 'shortcuts.vdf').exists() else b''
     if original_shortcuts:
         steam_shortcuts.decode(original_shortcuts)
     manifest = prepare_card(mount, source_root, rom_dirs, progress) if mode == 'prepare' else card.validated_manifest(mount)
+    if not (card.contained(mount, manifest['data_dir']) / 'system/prod.keys').is_file():
+        raise SetupError('The card has no dumped prod.keys. / На подготовленной карте отсутствуют ключи.')
+    firmware = card.contained(mount, manifest['data_dir']) / 'bis/system/Contents/registered'
+    if not firmware.is_dir() or not any(firmware.iterdir()):
+        raise SetupError('The card has no installed firmware. / На карте отсутствует установленная прошивка.')
     catalog = card.catalog_games(mount, manifest)
     titles = [card.game_id(game) for game in catalog if card.game_id(game)]
     if len(titles) != len(set(titles)):
-        raise SetupError('Multiple base games share a title ID. Keep one base file per game. / Для каждой игры оставь один базовый файл.')
+        raise SetupError('Multiple base games share a title ID. Keep one base file per game.')
     sync = card.contained(mount, manifest['sync_dir'])
     if (sync / 'pending.json').exists():
         raise SetupError('Finish the interrupted sync on the previous computer first. / Сначала восстанови прерванную синхронизацию.')
-    root = local / 'ryujinx'
-    root.mkdir(exist_ok=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:6]
     tx = Transaction(local / 'backups' / stamp)
     try:
@@ -359,48 +462,37 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
                 tx.replace(local / 'art' / p.name, p.read_bytes())
         for name in ('LICENSE', 'VERSION'):
             tx.replace(local / name, (package / name).read_bytes())
-        # A separate managed root makes the original EmuDeck profile a recovery source.
-        config = card.read(root / 'Config.json') if (root / 'Config.json').exists() else source_config
-        alias = local / 'card'
-        config['game_dirs'] = [str(alias / manifest['rom_dir'])]
+        active = local / 'active'
+        tx.replace(active, link=Path('/dev/null'))
+        config = dict(source_config)
+        config['game_dirs'] = [str(roms / 'switch')]
         tx.replace(root / 'Config.json', json_bytes(config))
-        tx.replace(alias, link=mount)
-        for name in SHARED:
-            tx.replace(root / name, link=alias / manifest['data_dir'] / name)
-        games = local / 'libraries' / manifest['library_id'].lower() / 'games'
-        games.mkdir(parents=True, exist_ok=True)
-        tx.replace(root / 'games', link=games)
-        for relative, template in manifest.get('game_metadata', {}).items():
-            target = card.contained(games, relative)
-            tx.replace(target, json_bytes(card.map_paths(template, alias)))
-        # Controller profiles and mapping databases are host-specific.
-        if not (root / 'profiles').exists() and (source_root / 'profiles').is_dir():
-            for p in (source_root / 'profiles').rglob('*'):
-                if p.is_file():
-                    tx.replace(root / 'profiles' / p.relative_to(source_root / 'profiles'), p.read_bytes())
-        if not (root / 'gamecontrollerdb.txt').exists() and (source_root / 'gamecontrollerdb.txt').is_file():
-            tx.replace(root / 'gamecontrollerdb.txt', (source_root / 'gamecontrollerdb.txt').read_bytes())
-        host = {'schema': 2, 'slot': slot, 'ryujinx_dir': str(root),
-                'emulator_executable': str(executable), 'root_data_argument': True,
-                'sync_runtime': str(local), 'version': VERSION}
+        links = {str(root / name): str(active / name) for name in SHARED + ('games',)}
+        links[str(roms / 'switch')] = str(active / 'roms')
+        for path, target in links.items():
+            tx.redirect(Path(path), Path(target))
+        host = {'schema': 3, 'architecture': 'native-emudeck', 'slot': slot,
+                'ryujinx_dir': str(root), 'native_launcher': str(launcher),
+                'roms_dir': str(roms / 'switch'), 'native_links': links, 'version': VERSION}
         tx.replace(local / 'host.json', json_bytes(host))
-        for name, command in [('ryujinx.sh', 'emulator'), ('sync.sh', 'sync')]:
-            # Runtime-relative shell entry; paths containing spaces and quotes work.
-            text = '#!/bin/sh\nset -eu\nBASE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec /usr/bin/python3 "$BASE/card_library.py" ' + command + ' "$@"\n'
-            tx.replace(local / name, text.encode(), mode=0o755)
-        apps = [('Switch Deck Sync', 'sync.sh', ''), ('Switch Library (Ryujinx)', 'ryujinx.sh', '')]
-        entries = [{'appname': name, 'exe': '"' + str(local / script) + '"',
-                    'StartDir': '"' + str(local) + '"', 'LaunchOptions': options,
-                    'icon': str(local / 'art/icon.ico') if script == 'sync.sh' else ''}
-                   for name, script, options in apps]
+        script = '#!/bin/sh\nset -eu\nBASE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec /usr/bin/python3 "$BASE/native_card.py" sync "$@"\n'
+        tx.replace(local / 'sync.sh', script.encode(), mode=0o755)
+        entries = [{'appname': 'Switch Deck Sync', 'exe': '"' + str(local / 'sync.sh') + '"',
+                    'StartDir': '"' + str(local) + '"', 'LaunchOptions': '',
+                    'icon': str(local / 'art/icon.ico')},
+                   {'appname': 'Ryujinx', 'exe': '"' + str(launcher) + '"',
+                    'StartDir': '"' + str(launcher.parent) + '"', 'LaunchOptions': ''}]
         for game in catalog:
+            filename = str(roms / 'switch' / card.relative_path(game['rom']))
+            if any(c in filename for c in '\x00\r\n'):
+                raise SetupError('Unsupported ROM filename')
+            argument = '"' + filename.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$').replace(chr(96), '\\' + chr(96)) + '"'
             title = card.game_id(game)
-            if title:
-                entries.append({'appname': game.get('name', title), 'title_id': title,
-                                'exe': '"' + str(local / 'ryujinx.sh') + '"', 'StartDir': '"' + str(local) + '"',
-                                'LaunchOptions': '--fullscreen --game ' + title})
+            entries.append({'appname': game.get('name', Path(game['rom']).stem) + ' (Ryujinx)',
+                            **({'title_id': title} if title else {}),
+                            'exe': '"' + str(launcher) + '"', 'StartDir': '"' + str(launcher.parent) + '"',
+                            'LaunchOptions': '--fullscreen ' + argument})
         idle_check()
-        # Detect a Steam write or profile change since the initial read.
         current = (steam_config / 'shortcuts.vdf').read_bytes() if (steam_config / 'shortcuts.vdf').exists() else b''
         if current != original_shortcuts:
             raise SetupError('Steam shortcuts changed during setup. Close Steam and retry.')
@@ -409,14 +501,14 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
         for source, suffix in [('cover', 'p'), ('hero', '_hero'), ('logo', '_logo'), ('grid', '')]:
             tx.replace(steam_config / 'grid' / (str(ids['Switch Deck Sync']) + suffix + '.png'),
                        (package / 'art' / (source + '.png')).read_bytes())
-        for name, script, _ in apps:
-            filename = 'switch-deck-sync.desktop' if script == 'sync.sh' else 'switch-library.desktop'
-            text = '[Desktop Entry]\nType=Application\nName=' + name + '\nExec=' + quoted_exec(local / script) + '\nIcon=' + str(local / 'art/icon.png') + '\nTerminal=false\nCategories=Game;Utility;\n'
-            tx.replace(home / '.local/share/applications' / filename, text.encode())
-        tx.replace(local / 'installation.json', json_bytes({'version': VERSION, 'backup': str(tx.folder),
-                   'steam_config': str(steam_config), 'source_root': str(source_root)}))
-        tx.commit()
-        return {'local': str(local), 'backup': str(tx.folder), 'games': len(entries) - 2}
+        text = '[Desktop Entry]\nType=Application\nName=Switch Deck Sync\nExec=' + quoted_exec(local / 'sync.sh') + '\nIcon=' + str(local / 'art/icon.png') + '\nTerminal=false\nCategories=Game;Utility;\n'
+        tx.replace(home / '.local/share/applications/switch-deck-sync.desktop', text.encode())
+        unit = home / '.config/systemd/user' / native_card.UNIT
+        tx.replace(unit, unit_contents(local))
+        tx.replace(unit.parent / 'default.target.wants' / native_card.UNIT, link=unit)
+        tx.replace(local / 'installation.json', json_bytes({'version': VERSION, 'architecture': 'native-emudeck',
+                   'backup': str(tx.folder), 'steam_config': str(steam_config), 'source_root': str(source_root)}))
+        return {'local': str(local), 'backup': str(tx.folder), 'games': len(catalog)}, tx, manifest['library_id']
     except BaseException:
         tx.rollback()
         raise

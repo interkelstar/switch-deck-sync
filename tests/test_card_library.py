@@ -1,132 +1,178 @@
 import copy
 import json
-import shutil
+import os
 from pathlib import Path
-import tempfile
+import shutil
 import unittest
 from unittest.mock import patch
-import card_library as c
 
-def dump(p,value):p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(value))
+import card_library as card
+import native_card
+import test_setup as fixtures
 
-class CartridgeTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory();self.base=Path(self.tmp.name)
-        self.local=self.base/'host';self.local.mkdir();self.root=self.base/'Ryujinx';self.root.mkdir()
-        dump(self.root/'Config.json',{'input_config':[{'gyro':'CemuHook'}],'game_dirs':[]})
-        self.host={'slot':{'kind':'mmc'},'ryujinx_dir':str(self.root)}
-    def tearDown(self):self.tmp.cleanup()
-    def cartridge(self,name,ident,profile):
-        p=self.base/name;p.mkdir()
-        for rel in ['data/bis/user/save','data/system','data/mods','data/sdcard','roms','sync']:(p/rel).mkdir(parents=True)
-        (p/'data/system/profile').write_text(profile)
-        dump(p/'sync/settings.json',{'host':profile,'games':{},'account_path':profile})
-        dump(p/'sync/state.json',{'proof':profile})
-        (p/'roms/Game [0000000000000100].xci').write_bytes(b'fixture')
-        manifest={'schema':2,'kind':'switch-library','library_id':ident*32,'data_dir':'data','rom_dir':'roms','sync_dir':'sync',
-            'games':[{'title_id':'0000000000000100','rom':'Game [0000000000000100].xci'}],
-            'game_metadata':{'0000000000000100/updates.json':{'selected':'@CARD@/roms/update.nsp'}}}
-        (p/'roms/update.nsp').write_bytes(b'fixture update');dump(p/'.switch-library.json',manifest)
-        return p,manifest
-    def disks(self,mount,uuid='new-card',usb=None):
-        values=[{'name':'mmcblk0','path':'/dev/mmcblk0','tran':'mmc','type':'disk','children':[
-            {'path':'/dev/mmcblk0p1','type':'part','fstype':'ext4','uuid':uuid,'mountpoints':[str(mount)]}]}]
-        if usb:values.append({'name':'sda','path':'/dev/sda','tran':'usb','type':'disk','children':[
-            {'path':'/dev/sda1','type':'part','fstype':'ext4','uuid':'usb','mountpoints':[str(usb)]}]})
-        return values
-    def test_replacement_card_new_uuid_is_accepted_without_registration(self):
-        card,m=self.cartridge('larger','a','profile-A');m['card_uuid']='old-uuid';dump(card/'.switch-library.json',m)
-        found,_,_=c.locate(self.host,False,self.disks(card,'different-new-uuid'));self.assertEqual(found,card)
-    def test_completely_different_library_is_accepted(self):
-        a,_=self.cartridge('a','a','profile-A');b,_=self.cartridge('b','b','profile-B')
-        for card in [a,b]:self.assertEqual(c.locate(self.host,False,self.disks(card))[0],card)
-    def test_internal_slot_has_priority_over_usb(self):
-        a,_=self.cartridge('slot','a','profile-A');b,_=self.cartridge('usb','b','profile-B')
-        self.assertEqual(c.locate(self.host,False,self.disks(a,usb=b))[0],a)
-    def test_steam_card_in_slot_does_not_fall_back_to_usb_switch_card(self):
-        steam=self.base/'steam';steam.mkdir();usb,_=self.cartridge('usb','b','profile-B')
-        with self.assertRaises(c.LibraryError):c.locate(self.host,False,self.disks(steam,usb=usb))
-    def test_absent_card_does_not_create_local_saves(self):
-        before=set(self.base.rglob('*'))
-        with self.assertRaises(c.LibraryError):c.prepare(self.host,self.local,False,[])
-        self.assertEqual(before,set(self.base.rglob('*')))
-    def test_malformed_card_does_not_redirect_current_profile(self):
-        card,m=self.cartridge('invalid','a','profile-A');m['data_dir']='../outside';dump(card/'.switch-library.json',m)
-        with self.assertRaises(c.LibraryError):c.prepare(self.host,self.local,False,self.disks(card))
-        self.assertFalse((self.local/'card').exists())
-    def test_external_profile_symlink_is_rejected(self):
-        card,_=self.cartridge('card','a','profile-A');outside=self.base/'outside';outside.mkdir()
-        (card/'data/system/profile').unlink();(card/'data/system').rmdir();(card/'data/system').symlink_to(outside)
-        with self.assertRaises(c.LibraryError):c.locate(self.host,False,self.disks(card))
-    def test_two_libraries_do_not_mix_profile_dlc_cache_or_sync_state(self):
-        a,ma=self.cartridge('a','a','profile-A');b,mb=self.cartridge('b','b','profile-B')
-        ma['game_metadata']['0000000000000100/dlc.json']=[{'path':'@CARD@/roms/dlc.nsp'}];dump(a/'.switch-library.json',ma)
-        c.prepare(self.host,self.local,False,self.disks(a))
-        (self.root/'games/cache-proof').write_text('A shaders')
-        self.assertTrue((self.root/'games/0000000000000100/dlc.json').exists())
-        c.prepare(self.host,self.local,False,self.disks(b))
-        self.assertEqual((self.root/'system/profile').read_text(),'profile-B')
-        self.assertFalse((self.root/'games/cache-proof').exists());self.assertFalse((self.root/'games/0000000000000100/dlc.json').exists())
-        self.assertEqual(c.read(b/'sync/settings.json')['account_path'],'profile-B')
-        self.assertEqual(c.read(a/'sync/state.json'),{'proof':'profile-A'});self.assertEqual(c.read(b/'sync/state.json'),{'proof':'profile-B'})
-        c.prepare(self.host,self.local,False,self.disks(a))
-        self.assertEqual((self.root/'system/profile').read_text(),'profile-A');self.assertEqual((self.root/'games/cache-proof').read_text(),'A shaders')
-        self.assertEqual(c.read(self.root/'Config.json')['input_config'],[{'gyro':'CemuHook'}])
-    def test_game_selected_by_title_id_survives_file_rename(self):
-        card,m=self.cartridge('card','a','profile-A');old=card/'roms'/m['games'][0]['rom'];old.rename(card/'roms/new-name.xci')
-        m['games'][0]['rom']='new-name.xci'
-        self.assertEqual(c.arguments(['--fullscreen','--game','0000000000000100'],m,card),['--fullscreen',str(card/'roms/new-name.xci')])
-        with self.assertRaises(c.LibraryError):c.arguments(['--game','0000000000000200'],m,card)
-    def test_game_symlink_to_other_storage_rejected(self):
-        card,m=self.cartridge('card','a','profile-A');p=card/'roms'/m['games'][0]['rom'];p.unlink();other=self.base/'outside.xci';other.write_bytes(b'fixture');p.symlink_to(other)
-        with self.assertRaises(c.LibraryError):c.arguments([str(p)],m,card)
-        with self.assertRaises(c.LibraryError):c.arguments(['--game','0000000000000100'],m,card)
-    def test_copying_only_emulation_folder_to_new_card_is_enough(self):
-        old,m=self.cartridge('old','a','profile-A');folder=old/'Emulation';folder.mkdir()
-        for name in ['data','roms','sync']:shutil.move(str(old/name),str(folder/name))
-        m.update(data_dir='Emulation/data',rom_dir='Emulation/roms',sync_dir='Emulation/sync')
-        dump(folder/'switch-library.json',m)
-        (old/'.switch-library.json').unlink()
-        new=self.base/'new-bigger-card';new.mkdir();shutil.copytree(folder,new/'Emulation')
-        self.assertEqual(c.locate(self.host,False,self.disks(new,'unregistered-uuid'))[0],new)
-    def test_dlc_nca_internal_path_not_rewritten(self):
-        self.assertEqual(c.map_paths({'path':'@CARD@/roms/dlc.nsp','nca':'/content.nca'},Path('/card')),
-                         {'path':'/card/roms/dlc.nsp','nca':'/content.nca'})
-        with self.assertRaises(c.LibraryError):c.map_paths('@CARD@/../wrong',Path('/card'))
-    def test_removing_update_from_card_clears_host_cache_selection(self):
-        card,m=self.cartridge('card','a','profile-A');c.prepare(self.host,self.local,False,self.disks(card))
-        self.assertTrue((self.root/'games/0000000000000100/updates.json').exists())
-        m['game_metadata']={};dump(card/'.switch-library.json',m);c.prepare(self.host,self.local,False,self.disks(card))
-        self.assertFalse((self.root/'games/0000000000000100/updates.json').exists())
-    def test_session_lock_blocks_concurrent_library_changes(self):
-        with c.session_lock(self.local):
-            with self.assertRaises(c.LibraryError):
-                with c.session_lock(self.local):pass
-    def test_export_updates_are_portable_and_do_not_pin_card_uuid(self):
-        card,m=self.cartridge('card','a','profile-A');c.prepare(self.host,self.local,False,self.disks(card))
-        p=self.root/'games/0000000000000100/updates.json';dump(p,{'selected':str(self.local/'card/roms/new.nsp')})
-        with patch.object(Path,'is_mount',return_value=True):c.export_metadata(card,m,self.local/'card',self.root)
-        value=c.read(card/'.switch-library.json');self.assertEqual(value['game_metadata']['0000000000000100/updates.json']['selected'],'@CARD@/roms/new.nsp')
-        self.assertNotIn('card_uuid',value)
-    def test_frontend_settings_accept_esde_native_xml_fragment(self):
-        p=self.base/'es-settings.xml';p.write_text('<?xml version="1.0"?>\n<string name="ROMDirectory" value="old"/>\n<string name="MediaDirectory" value="old"/>\n<bool name="KeepMe" value="true"/>')
-        c.prepare_frontend({'frontend_settings':str(p),'frontend_media':'/local/media'},Path('/slot'),{'rom_dir':'Emulation/roms/switch'})
-        self.assertIn('/slot/Emulation/roms',p.read_text());self.assertIn('name="KeepMe"',p.read_text())
-    def test_frontend_settings_accept_single_xml_root(self):
-        p=self.base/'es-settings.xml';p.write_text('<config><string name="ROMDirectory" value="old"/></config>')
-        c.prepare_frontend({'frontend_settings':str(p),'frontend_media':'/local/media'},Path('/slot'),{'rom_dir':'Emulation/roms/switch'})
-        self.assertIn('<config>',p.read_text());self.assertIn('/slot/Emulation/roms',p.read_text())
-    def test_catalog_tracks_added_removed_and_renamed_games_without_host_registration(self):
-        card,m=self.cartridge('card','a','profile-A')
-        old=card/'roms'/m['games'][0]['rom'];old.rename(card/'roms/Renamed [0000000000000100].xci')
-        (card/'roms/New [0000000000001000].nsp').write_bytes(b'fixture')
-        (card/'roms/Update [0000000000001800].nsp').write_bytes(b'fixture')
-        (card/'roms/Pack [0000000000001001].nsp').write_bytes(b'fixture')
-        catalog=c.catalog_games(card,m)
-        self.assertEqual({g['rom'] for g in catalog},{'Renamed [0000000000000100].xci','New [0000000000001000].nsp'})
-        self.assertEqual({c.game_id(g) for g in catalog},{'0000000000000100','0000000000001000'})
-        (card/'roms/Renamed [0000000000000100].xci').unlink()
-        self.assertEqual(len(c.catalog_games(card,m)),1)
 
-if __name__=='__main__':unittest.main()
+class NativeCardTests(unittest.TestCase):
+    setUp = fixtures.SetupTests.setUp
+    tearDown = fixtures.SetupTests.tearDown
+    prepare = fixtures.SetupTests.prepare
+    install = fixtures.SetupTests.install
+    devices = fixtures.SetupTests.devices
+    start_data = fixtures.SetupTests.start_data
+    stop_data = fixtures.SetupTests.stop_data
 
+    def other_card(self):
+        second = self.base / 'second card'
+        shutil.copytree(self.mount, second)
+        value = card.read(card.marker_path(second))
+        value['library_id'] = 'b' * 32
+        card.write_changed(card.marker_path(second), value)
+        card.write_changed(second / value['data_dir'] / 'system/Profiles.json',
+                           {'profiles': [{'name': 'Other card profile'}]})
+        return second
+
+    def test_new_uuid_and_different_library_are_accepted_in_the_same_reader(self):
+        self.prepare()
+        second = self.other_card()
+        self.install()
+        old_controls = card.read(self.source / 'Config.json')['input_config']
+        self.manager.tick(self.devices(second), busy=False, allow_mount=False)
+        self.assertEqual(card.read(self.source / 'system/Profiles.json')['profiles'][0]['name'], 'Other card profile')
+        self.assertEqual(card.read(self.source / 'Config.json')['input_config'], old_controls)
+        self.manager.tick(self.devices(), busy=False, allow_mount=False)
+        self.assertEqual(card.read(self.source / 'system/Profiles.json')['profiles'][0]['name'], 'Fixture User')
+
+    def test_usb_library_is_not_used_when_selected_slot_contains_ordinary_steam_card(self):
+        self.prepare()
+        self.install()
+        steam = self.base / 'steam card'
+        steam.mkdir()
+        devices = self.devices(steam)
+        usb = copy.deepcopy(self.devices()[0])
+        usb.update(name='sda', path='/dev/sda', tran='usb')
+        usb['children'][0]['path'] = '/dev/sda1'
+        devices.append(usb)
+        self.manager.tick(devices, busy=False, allow_mount=False)
+        self.assertEqual(os.readlink(self.local / 'active'), '/dev/null')
+        self.assertEqual(card.read(self.local / 'native-status.json')['state'], 'absent')
+
+    def test_no_card_prevents_fallback_local_saves(self):
+        self.prepare()
+        self.install()
+        self.manager.tick([], busy=False, allow_mount=False)
+        with self.assertRaises(OSError):
+            (self.source / 'bis/user/save/accidental-local-save').mkdir(parents=True)
+        self.assertFalse((self.local / 'active').is_dir())
+        self.assertEqual((self.mount / 'Emulation/storage/ryujinx/data/system/prod.keys').read_text(), 'fixture, not keys')
+
+    def test_service_descriptor_does_not_pin_card_and_crash_does_not_create_local_saves(self):
+        self.prepare()
+        self.install()
+        target = os.readlink(self.local / 'active')
+        self.assertTrue(target.startswith('/proc/'))
+        fd_path = Path('/proc/self/fd') / str(self.manager.directory_fd)
+        self.assertTrue(str(fd_path.resolve()).startswith(str(self.local / 'targets')))
+        os.close(self.manager.directory_fd)
+        self.manager.directory_fd = None
+        with self.assertRaises(OSError):
+            (self.source / 'bis/user/save/unwanted').mkdir(parents=True)
+
+    def test_busy_emulator_never_switches_to_another_profile(self):
+        self.prepare()
+        second = self.other_card()
+        self.install()
+        self.manager.tick(self.devices(second), busy=True, allow_mount=False)
+        self.assertEqual(card.read(self.local / 'native-status.json')['state'], 'busy')
+        self.assertFalse((self.source / 'system/Profiles.json').exists())
+        self.manager.tick(self.devices(second), busy=False, allow_mount=False)
+        self.assertEqual(card.read(self.source / 'system/Profiles.json')['profiles'][0]['name'], 'Other card profile')
+
+    def test_partial_metadata_write_does_not_disconnect_active_game(self):
+        self.prepare()
+        self.install()
+        p = self.source / 'games/0000000000001000/updates.json'
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text('{')
+        active = os.readlink(self.local / 'active')
+        self.manager.tick(self.devices(), busy=True, allow_mount=False)
+        self.assertEqual(os.readlink(self.local / 'active'), active)
+        self.assertTrue((self.source / 'system/Profiles.json').is_file())
+        p.write_text(json.dumps({'selected': str(self.local / 'active/card/Emulation/storage/ryujinx/patchesAndDlc/new.nsp')}))
+        with patch.object(Path, 'is_mount', return_value=True):
+            self.manager.tick(self.devices(), busy=False, allow_mount=False)
+        manifest = card.read(card.marker_path(self.mount))
+        self.assertEqual(manifest['game_metadata']['0000000000001000/updates.json']['selected'],
+                         '@CARD@/Emulation/storage/ryujinx/patchesAndDlc/new.nsp')
+
+    def test_cache_namespaces_and_update_paths_do_not_leak_between_cards(self):
+        value = self.prepare()
+        value['game_metadata'] = {'0000000000001000/updates.json': {'selected': '@CARD@/Emulation/roms/switch/update.nsp'}}
+        card.write_changed(card.marker_path(self.mount), value)
+        second = self.other_card()
+        other = card.read(card.marker_path(second))
+        other['game_metadata'] = {}
+        card.write_changed(card.marker_path(second), other)
+        self.install()
+        (self.source / 'games/cache-proof').write_text('first card shaders')
+        self.manager.tick(self.devices(second), busy=False, allow_mount=False)
+        self.assertFalse((self.source / 'games/cache-proof').exists())
+        self.assertFalse((self.source / 'games/0000000000001000/updates.json').exists())
+        self.manager.tick(self.devices(), busy=False, allow_mount=False)
+        self.assertEqual((self.source / 'games/cache-proof').read_text(), 'first card shaders')
+        self.assertIn(str(self.local / 'active/card'), (self.source / 'games/0000000000001000/updates.json').read_text())
+
+    def test_emudeck_reset_is_detected_without_replacing_native_settings(self):
+        self.prepare()
+        self.install()
+        (self.source / 'bis').unlink()
+        (self.source / 'bis/user/save').mkdir(parents=True)
+        (self.source / 'bis/user/save/proof').write_text('new native data')
+        config = (self.source / 'Config.json').read_bytes()
+        self.manager.tick(self.devices(), busy=False, allow_mount=False)
+        self.assertFalse((self.local / 'active').is_dir())
+        self.assertEqual((self.source / 'bis/user/save/proof').read_text(), 'new native data')
+        self.assertEqual((self.source / 'Config.json').read_bytes(), config)
+
+    def test_external_symlinks_in_card_data_are_rejected(self):
+        value = self.prepare()
+        outside = self.base / 'outside'
+        outside.mkdir()
+        system = self.mount / value['data_dir'] / 'system'
+        shutil.rmtree(system)
+        system.symlink_to(outside)
+        with self.assertRaises(card.LibraryError):
+            card.validated_manifest(self.mount)
+
+    def test_card_clone_needs_only_the_emulation_folder(self):
+        self.prepare()
+        second = self.base / 'larger card'
+        second.mkdir()
+        shutil.copytree(self.mount / 'Emulation', second / 'Emulation')
+        found, _, _ = card.locate({'slot': {'kind': 'mmc'}}, False, self.devices(second))
+        self.assertEqual(found, second)
+
+    def test_dlc_internal_nca_paths_are_not_rewritten(self):
+        self.assertEqual(card.map_paths({'path': '@CARD@/roms/dlc.nsp', 'nca': '/content.nca'}, Path('/card')),
+                         {'path': '/card/roms/dlc.nsp', 'nca': '/content.nca'})
+        with self.assertRaises(card.LibraryError):
+            card.map_paths('@CARD@/../wrong', Path('/card'))
+
+    def test_catalog_detects_new_base_games_and_excludes_updates(self):
+        value = self.prepare()
+        roms = self.mount / value['rom_dir']
+        (roms / 'New [0000000000002000].nsp').write_bytes(b'fixture')
+        (roms / 'Update [0000000000002800].nsp').write_bytes(b'fixture')
+        catalog = card.catalog_games(self.mount, value)
+        self.assertEqual({card.game_id(g) for g in catalog}, {'0000000000001000', '0000000000002000'})
+
+    def test_service_restart_attaches_the_card_without_an_emulator_launch(self):
+        self.prepare()
+        self.install()
+        self.stop_data()
+        self.assertEqual(os.readlink(self.local / 'active'), '/dev/null')
+        self.start_data(self.local, '')
+        self.assertTrue((self.source / 'system/Profiles.json').is_file())
+        self.assertFalse((self.source / 'executed.json').exists())
+
+
+if __name__ == '__main__':
+    unittest.main()
