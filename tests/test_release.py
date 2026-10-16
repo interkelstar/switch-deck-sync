@@ -2,6 +2,8 @@ import hashlib
 import importlib.util
 import json
 import os
+import posixpath
+import re
 from pathlib import Path
 import shutil
 import shlex
@@ -17,6 +19,28 @@ spec.loader.exec_module(release)
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_packaged_documentation_links_resolve(self):
+        values = release.contents()
+        for name, data in values.items():
+            if not name.endswith('.md'):
+                continue
+            for target in re.findall(r'!?\[[^\]]*\]\(([^)]+)\)', data.decode('utf-8')):
+                if target.startswith(('https://','http://','#')) or target == '../../releases':
+                    continue
+                path = posixpath.normpath(posixpath.join(posixpath.dirname(name), target.split('#',1)[0]))
+                self.assertIn(path, values, (name,target))
+
+    def test_release_rejects_private_material_in_allowlisted_text(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for name in release.FILES:
+                dest = root/name
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT/name, dest)
+            (root/'README.md').write_text('-----BEGIN OPENSSH PRIVATE KEY-----')
+            with self.assertRaisesRegex(ValueError,'Private string'):
+                release.contents(root)
+
     def test_launcher_uses_gio_environment_if_desktop_field_is_missing(self):
         with tempfile.TemporaryDirectory(prefix='installer fallback ') as temp:
             root = Path(temp)

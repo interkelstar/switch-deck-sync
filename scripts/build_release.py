@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 import sys
 import tarfile
@@ -38,9 +39,11 @@ def contents(root=ROOT):
     for name, data in values.items():
         if name.endswith(('.py', '.sh', '.desktop', '.md', '.txt', '.svg', '.patch', '.example')):
             text = data.decode('utf-8')
-            # Project-specific accidental private material, not sample IPs or title IDs.
-            for pattern in ('/home/deck/', '192.168.1.90', '192.168.1.60', 'kelstar', 'sudoPass'):
-                if pattern in text:
+            # Generic checks, without embedding a maintainer's host details.
+            for pattern in (r'/home/[A-Za-z0-9_.-]+/', r'[A-Za-z]:[\\/]Users[\\/][^\\/\s]+',
+                            r'-----BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----',
+                            r'(?:gh[pousr]_[A-Za-z0-9]{25,}|github_pat_[A-Za-z0-9_]{30,})'):
+                if re.search(pattern, text):
                     raise ValueError('Private string in release file: ' + name)
     values['SHA256SUMS.json'] = (json.dumps({name: hashlib.sha256(data).hexdigest()
                                           for name, data in sorted(values.items())}, indent=2) + '\n').encode()
