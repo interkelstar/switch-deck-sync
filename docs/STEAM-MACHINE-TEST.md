@@ -4,7 +4,13 @@ Status: ordinary-user installation and all three games/saves/controls passed on 
 first Steam Machine with 0.3.1. The user then updated to 0.4.0, removed the four
 old game/emulator entries, and recreated them with chosen artwork using SRM. All
 four entries work. The Switch address, profiles and three games are retained in
-save-sync settings. The Wi-Fi transfer check remains pending. Gyro is a separate host/controller setup.
+save-sync settings. On 2026-10-17 the user ran sync in the installed 0.4.0 app:
+all three games reported transfer from Ryujinx to Switch with a success checkmark.
+The sync engine reads saves back after writing before reporting success. This is
+user-observed UI acceptance; no SSH inspection or separate on-console save-load
+check was performed on the Steam Machine test. Setup and testing used no SSH.
+Gyro is a separate host/controller setup. Remaining checklist items below are
+additional coverage, not claims of completed hardware tests.
 
 1. Install EmuDeck in Custom Mode to Internal Storage with the prepared card removed.
    Select Ryujinx and Steam ROM Manager; ES-DE is optional.
