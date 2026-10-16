@@ -4,7 +4,7 @@ Name=Install Switch Deck Sync
 Name[ru]=Установить Switch Deck Sync
 Comment=Connect or prepare a portable Switch library
 Comment[ru]=Подключить или подготовить переносимую библиотеку Switch
-Exec=/usr/bin/python3 -c "import pathlib,runpy,sys,urllib.parse; p=pathlib.Path(urllib.parse.unquote(urllib.parse.urlparse(sys.argv[1]).path)) if sys.argv[1].startswith('file:') else pathlib.Path(sys.argv[1]); runpy.run_path(str(p.resolve().parent/'install.py'),run_name='__main__')" %k
+Exec=/usr/bin/python3 -c "import os,pathlib,runpy,sys,urllib.parse; raw=next(iter(sys.argv[1:]),os.environ.get('GIO_LAUNCHED_DESKTOP_FILE','')); assert raw, 'The desktop launcher did not provide its file location. Run sh install.sh instead.'; p=pathlib.Path(urllib.parse.unquote(urllib.parse.urlparse(raw).path)) if raw.startswith('file:') else pathlib.Path(raw); runpy.run_path(str(p.resolve().parent/'install.py'),run_name='__main__')" %k
 Icon=applications-games
 Terminal=false
 Categories=Game;Utility;
