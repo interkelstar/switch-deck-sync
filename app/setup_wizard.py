@@ -13,6 +13,7 @@ import time
 import card_library as card
 import setup_library as setup
 import native_card
+import srm_artwork
 
 
 class Cancelled(Exception):
@@ -74,8 +75,8 @@ class Wizard:
             subprocess.run([self.dbus, *self.progress_address, 'close'], capture_output=True)
         self.progress_address = None
 
-    def dependencies(self):
-        missing = [name for name in ('lsblk', 'udisksctl', 'systemctl') if not shutil.which(name)]
+    def dependencies(self, portable=False):
+        missing = [name for name in ('lsblk', 'udisksctl', 'systemctl') if not shutil.which(name)] if portable else []
         missing += [name for name in ('SDL2', 'SDL2_ttf') if not ctypes.util.find_library(name)]
         fonts = Path('/usr/share/fonts')
         if not any(fonts.rglob('DejaVuSans.ttf')):
@@ -88,6 +89,11 @@ class Wizard:
             'Save and close your games and Switch Deck Sync. Steam will close to update your library. Open Steam again after setup.',
             'Сохранись и закрой игры и Switch Deck Sync. Steam закроется для обновления библиотеки. После установки открой Steam снова.'))
         setup.require_idle(steam=False)
+        try:
+            setup.require_idle()
+            return
+        except setup.SetupError:
+            pass
         if shutil.which('steam'):
             subprocess.run(['steam', '-shutdown'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
         for _ in range(40):
@@ -126,11 +132,13 @@ class Wizard:
             raise setup.SetupError('Cannot determine the mount point / Не удалось определить папку карты')
         return Path(mounts[0]), slot
 
-    def steam_profile(self):
+    def steam_profile(self, required=True):
         bases = [self.home / '.local/share/Steam', self.home / '.steam/steam']
         configs = list(dict.fromkeys(p.resolve() for base in bases for p in base.glob('userdata/*/config')
                                     if p.parent.name.isdigit() and p.parent.name != '0'))
         if not configs:
+            if not required:
+                return None
             raise setup.SetupError(self.t('Sign into Steam once before installing.', 'Перед установкой один раз войди в Steam.'))
         if len(configs) == 1:
             return configs[0]
@@ -154,101 +162,77 @@ class Wizard:
             return
         self.dialog('--msgbox', self.t('A previous setup was interrupted. Its changes will be rolled back before retrying.', 'Предыдущая установка прервалась. Сначала восстановим прежние настройки.'))
         self.close_steam()
-        native_card.stop_service()
+        had_unit = (self.home / '.config/systemd/user' / native_card.UNIT).is_file()
+        if had_unit:
+            native_card.stop_service()
         with card.session_lock(local):
             for folder in sorted(pending, reverse=True):
                 setup.restore(folder)
-        native_card.systemctl('daemon-reload')
-        if (self.home / '.config/systemd/user' / native_card.UNIT).is_file():
-            native_card.systemctl('restart', native_card.UNIT)
-
-    def restore_previous(self):
-        local = self.home / '.local/share/switch-deck-sync'
-        info = card.read(local / 'installation.json')
-        folder = Path(info['backup'])
-        self.dialog('--yesno', self.t('Restore settings and Steam shortcuts from before the last installation? Card games and saves will be retained.', 'Восстановить настройки и ярлыки Steam до последней установки? Игры и сейвы на карте сохранятся.'))
-        self.close_steam()
-        native_card.stop_service()
-        with card.session_lock(local):
-            setup.restore(folder)
-        native_card.systemctl('daemon-reload')
-        if (self.home / '.config/systemd/user' / native_card.UNIT).is_file():
-            native_card.systemctl('restart', native_card.UNIT)
-        self.dialog('--msgbox', self.t('Previous settings restored. Open Steam from the application menu.', 'Прежние настройки восстановлены. Открой Steam через меню приложений.'))
-
-    def run(self):
-        self.dependencies()
-        self.ru = self.choose('Language / Язык', [(False, 'English'), (True, 'Русский')])
-        self.dialog('--msgbox', self.t(
-            'Set up your Switch game library and Wi-Fi save sync on this computer. Connect your memory card to get started.',
-            'Настрой библиотеку игр Switch и обмен сейвами по Wi-Fi на этом компьютере. Для начала подключи карту памяти.'))
-        self.recover()
-        if (self.home / '.local/share/switch-deck-sync/installation.json').is_file():
-            action = self.choose(self.t('Choose an action', 'Выбери действие'),
-                                 [('install', self.t('Install or update', 'Установить или обновить')),
-                                  ('restore', self.t('Restore the previous settings', 'Восстановить прежние настройки'))])
-            if action == 'restore':
-                self.restore_previous()
-                return
-        mount, slot = self.select_card()
-        ready = card.marker_path(mount).is_file()
-        if ready:
-            mode = 'attach'
-            manifest = card.validated_manifest(mount)
-        else:
-            mode = self.choose(self.t('This card has no portable library yet', 'На карте пока нет переносимой библиотеки'),
-                               [('prepare', self.t('Prepare from my Ryujinx installation', 'Подготовить из моей установки Ryujinx'))])
-            manifest = None
-        roms, executable = setup.native_paths(self.home)
-        root = self.home / '.config/Ryujinx'
-        if not (root / 'Config.json').is_file():
-            raise setup.SetupError(self.t('Start and close Ryujinx once from the application menu, then retry.', 'Один раз открой и закрой Ryujinx через меню приложений, затем повтори установку.'))
-        config = card.read(root / 'Config.json')
-        rom_dirs = []
-        if mode == 'prepare':
-            options = list(dict.fromkeys([Path(p) for p in config.get('game_dirs', []) if Path(p).is_dir()] +
-                                         ([mount / 'Emulation/roms/switch'] if (mount / 'Emulation/roms/switch').is_dir() else [])))
-            use_all = self.t('Use all detected game folders', 'Использовать все найденные папки с играми')
-            selected = self.choose(self.t('Games to include', 'Какие игры включить'),
-                                   ([(options, use_all + ': ' + ', '.join(map(str, options)))] if options else []) + [(None, self.t('Browse…', 'Выбрать папку…'))])
-            rom_dirs = selected or [self.directory(self.t('Folder with your Switch games', 'Папка с твоими играми Switch'), mount)]
-        steam_config = self.steam_profile()
-        count = len(card.catalog_games(mount, manifest)) if ready else self.t('from selected folders', 'из выбранных папок')
-        details = self.t('Connect existing card', 'Подключить готовую карту') if ready else self.t('Copy and verify data; originals are retained', 'Скопировать и проверить данные; оригиналы сохраняются')
-        self.dialog('--yesno', self.t('Install Switch Deck Sync?', 'Установить Switch Deck Sync?') + '\n\n' +
-                    details + '\n' + str(mount) + '\n' + self.t('Games: ', 'Игры: ') + str(count) + '\n\n' +
-                    self.t('Your games and Switch Deck Sync will appear in Steam. A backup will be saved so you can undo setup.',
-                           'В Steam появятся игры и Switch Deck Sync. Для отмены установки будет сохранена резервная копия.'))
-        self.close_steam()
-        self.busy()
-        try:
-            setup.install(self.package, self.home, mount, slot, executable, root, steam_config,
-                          mode, rom_dirs, self.progress)
-        finally:
-            self.end_busy()
-        if ready:
-            message = self.t(
-                'Setup complete. Open Steam from the application menu to play your games or launch Switch Deck Sync. Your card’s sync settings are ready to use.',
-                'Установка завершена. Открой Steam через меню приложений, чтобы играть или запустить Switch Deck Sync. Настройки синхронизации с карты уже готовы к использованию.')
-        else:
-            message = self.t(
-                'Setup complete. Open Steam from the application menu, then launch Switch Deck Sync to choose your Switch address, profiles and games. For Switch setup, see docs/SWITCH.md in this folder.',
-                'Установка завершена. Открой Steam через меню приложений, затем запусти Switch Deck Sync и выбери адрес Switch, профили и игры. Настройка самого Switch описана в docs/SWITCH.md в этой папке.')
-        self.dialog('--msgbox', message)
-
-
-def main(package):
-    if sys.platform != 'linux':
-        raise SystemExit('Run this installer on SteamOS / Linux, in Desktop Mode.')
-    if not shutil.which('kdialog'):
-        raise SystemExit('KDE kdialog is required. Run on SteamOS in Desktop Mode.')
-    wizard = Wizard(package)
-    try:
-        wizard.run()
-    except Cancelled:
-        return 0
-    except Exception as ex:
-        wizard.end_busy()
-        subprocess.run(['kdialog', '--title', 'Switch Deck Sync', '--error', str(ex)], check=False)
-        return 1
+        if had_unit:
+   …14848 tokens truncated…0дрес пока не указан'
+                text('Switch: '+address+((':'+str(settings['port'])) if settings.get('host') else ''),66,278)
+                text('Профили: '+settings.get('switch_profile_name','не выбран')+'  ↔  '+settings.get('deck_profile_name','не выбран'),66,326)
+                text('Выбрано игр: '+str(len(settings['games'])),66,374)
+                text('Закрой игры на обоих устройствах. На Switch открой ftpsrv Save Sync.',66,462,26,(166,185,203))
+                if (core.HOME/'pending.json').exists():text('Есть прерванная передача — повтори синхронизацию.',66,546,22,(250,174,117))
+                buttons=[(66,646,410,76,'Синхронизировать'),(506,646,350,76,'Настройки'),(886,646,328,76,'Выход')]
+            elif phase=='settings':
+                labels=[('Адрес Switch',settings.get('host','')+':'+str(settings['port'])),('Папка Ryujinx',settings['ryujinx_dir']),('Профиль Switch',settings.get('switch_profile_name','Выбрать')),('Профиль Ryujinx',settings.get('deck_profile_name','Выбрать')),('Игры',str(len(settings['games']))+' выбрано')]
+                for i,(label,value) in enumerate(labels):buttons.append((66,184+i*85,1148,70,label+'   ·   '+value))
+                buttons.append((864,646,350,76,'Назад'))
+            elif phase in ['working','loading']:
+                text('Синхронизация' if phase=='working' else 'Поиск',66,224,32)
+                text(status,66,294,26)
+                fill((66,395,1148,12),(43,53,68));pos=int((sdl.SDL_GetTicks()%2400)/2400*900)
+                fill((66+pos,395,240,12),(52,202,221))
+                text('Оставь ftpsrv Save Sync открытым на Switch.',66,475,26,(168,183,202))
+                text('Перед заменой сохраняются резервные копии.',66,520,22,(145,164,187))
+            elif phase=='done':
+                text('Проверка завершена',66,188,32,(114,220,169))
+                y=245
+                for result in results[:5]:text(result,66,y,22);y+=66
+                if len(results)>5:text('Ещё '+str(len(results)-5)+' игр. Полный итог сохранён в журнале.',66,580,22)
+                else:text('Можно закрыть ftpsrv и запускать игру.',66,582,26,(168,183,202))
+                buttons=[(864,646,350,76,'Готово')]
+            elif phase=='conflict':
+                text('Нужно выбрать копию',66,210,32,(245,193,104));text(status,66,270,26)
+                text('Выбери прогресс для обоих устройств. Обе версии уже сохранены в резерве. Даты файлов не определяют выбор.',66,330,26)
+                buttons=[(66,630,350,82,'Взять Switch'),(465,630,350,82,'Взять Ryujinx'),(864,630,350,82,'Пропустить')]
+            elif phase=='error':
+                text('Не удалось завершить',66,200,32,(245,158,137));text(error,66,270,26)
+                buttons=[(465,646,350,76,'Настройки'),(864,646,350,76,'На главный')]
+            elif phase=='edit':
+                text('Адрес Switch' if edit_kind=='server' else 'Папка данных Ryujinx',66,180,32)
+                text('Steam + X — клавиатура. B — отменить.',66,236,22,(168,183,202))
+                fill((66,295,1148,90),(34,48,64));text(entry+'|',84,312,26,width=1100)
+                text(error,66,408,22,(245,193,104))
+                buttons=[(465,646,350,76,'Сохранить'),(864,646,350,76,'Отмена')]
+            elif phase=='pick':
+                title={'switch':'Выбери профиль Switch','deck':'Выбери профиль Ryujinx','games':'Игры для синхронизации'}[pick_kind]
+                text(title,66,160,32)
+                if pick_kind=='games':text('Все сейвы Switch. Для синхронизации нужен сейв и в Ryujinx.',66,204,22,(147,174,195))
+                if not choices:text('Общих сохранений пока нет. Запусти игру и создай сейв на обоих устройствах.',66,270,26)
+                for i,item in enumerate(choices[page*4:page*4+4]):
+                    mark=('[✓] ' if item['key'] in selected else '[  ] ') if pick_kind=='games' else ''
+                    if pick_kind=='games' and not item['available']:mark='Нет сейва Ryujinx · '
+                    buttons.append((66,247+i*78,1148,65,mark+item['name']))
+                text(error or ('Страница '+str(page+1)+' / '+str(max(1,(len(choices)+3)//4))),66,584,22,(245,193,104) if error else (147,174,195))
+                buttons.extend([(66,646,250,76,'← Назад'),(346,646,250,76,'Вперёд →'),(626,646,285,76,'Применить'),(941,646,273,76,'Отмена')])
+            selection=min(selection,max(0,len(buttons)-1))
+            for i,(x,y,w,h,label) in enumerate(buttons):
+                fill((x,y,w,h),(34,112,140) if i==selection else (30,44,61))
+                width=I();height=I();original=label
+                while label:
+                    ttf.TTF_SizeUTF8(fonts[22],label.encode(),C.byref(width),C.byref(height))
+                    if width.value<=w-40:break
+                    original=original[:-1];label=original+'…'
+                text(label,x+20,y+18,22,width=w-35)
+            if buttons:text('A — выбрать     B — назад     Крестовина — перемещение',66,756,22,(145,164,187))
+            sdl.SDL_RenderPresent(renderer)
+    finally:
+        sdl.SDL_StopTextInput()
+        for texture,_,_ in cache.values():sdl.SDL_DestroyTexture(texture)
+        for font in fonts.values():ttf.TTF_CloseFont(font)
+        for controller in controllers:sdl.SDL_GameControllerClose(controller)
+        sdl.SDL_DestroyRenderer(renderer);sdl.SDL_DestroyWindow(window);ttf.TTF_Quit();sdl.SDL_Quit()
     return 0

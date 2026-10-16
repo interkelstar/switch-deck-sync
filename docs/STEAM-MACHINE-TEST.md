@@ -1,15 +1,19 @@
 # First Steam Machine acceptance test
 
-Status: not yet completed on target hardware.
+Status: ordinary-user installation and all three games/saves/controls passed on the
+first Steam Machine with 0.3.1. Its Wi-Fi sync check and 0.4 installer acceptance
+remain pending. Gyro is a separate host/controller setup.
 
 1. Install EmuDeck in Custom Mode to Internal Storage with the prepared card removed.
    Select Ryujinx and Steam ROM Manager; ES-DE is optional.
 2. Open and close Ryujinx from the application menu. AutoMap enabled notice is native
    EmuDeck behavior; a missing keys warning is expected on the empty host.
-3. Insert the prepared card. Extract the 0.3.2 installer ZIP and open Install.desktop.
-   Choose language/reader; no SSH, source edits, paths or emulator binary selection.
+3. Insert the prepared card. Extract the 0.4.0 installer ZIP and open Install.desktop.
+   Choose the optional portable library and its reader. Existing installations use
+   Update current installation to keep their mode.
 4. Confirm attachment. After setup completes, open Steam from its normal application
-   menu icon. Check that games and Switch Deck Sync appear in the library.
+   menu icon. Check Switch Deck Sync appears and existing game shortcuts are retained.
+   On a fresh host, choose games/emulators in SRM and save those to Steam.
 5. Launch Zelda from Game Mode. Confirm familiar save progress and controller input.
    If AutoMap was disabled, verify the manual setting stays disabled.
 6. Close the game. Open native Ryujinx from the application menu and confirm the
@@ -21,6 +25,12 @@ Status: not yet completed on target hardware.
    No USB fallback or cross-profile mapping is allowed.
 10. Rerun the installer to check idempotence, then check Restore. Original host
     configuration/folders must return without changing card saves.
+
+Also test the default sync-only choice on a host with configured Ryujinx and no
+card/EmuDeck. No reader selection or card service should be required. Check local
+sync settings/history, desktop/Steam entry, update and restore. For artwork, export
+with SRM, save the complete native export on the card and import it in SRM on the
+other host; review matched artwork before saving.
 
 Automated Linux checks use synthetic games, keys/firmware and launcher fixtures.
 They validate data ownership and direct command routing, not hardware performance

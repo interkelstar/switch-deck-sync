@@ -13,10 +13,11 @@ import steam_shortcuts
 import native_card
 import legacy_migration
 
-VERSION = '0.3.2-preview'
+VERSION = '0.4.0-preview'
 SHARED = ('bis', 'system', 'mods', 'sdcard')
 RUNTIME = ('card_library.py', 'native_card.py', 'switch_save_sync.py', 'sync_config.py', 'sync_ui.py',
-           'setup_library.py', 'setup_wizard.py', 'steam_shortcuts.py', 'legacy_migration.py')
+           'setup_library.py', 'setup_wizard.py', 'steam_shortcuts.py', 'legacy_migration.py',
+           'sync_launcher.py', 'srm_artwork.py')
 
 
 class SetupError(Exception):
@@ -213,6 +214,7 @@ def restore(folder):
 def emulator_roots(home):
     candidates = [home / '.config/Ryujinx', home / 'Applications/publish/portable']
     candidates += list((home / 'Applications').glob('**/portable'))
+    candidates += list((home / '.var/app').glob('*/config/Ryujinx'))
     return list(dict.fromkeys(p for p in candidates if (p / 'Config.json').is_file()))
 
 
@@ -278,7 +280,7 @@ def portable_metadata(root, mount, progress):
     return templates
 
 
-def prepare_card(mount, source_root, rom_dirs, progress=lambda text: None):
+def prepare_card(mount, source_root, rom_dirs, progress=lambda text: None, sync_source=None):
     """Publish the marker only after complete, verified copies. Source data stays put."""
     if card.marker_path(mount).exists():
         raise SetupError('Library already exists: use Attach. / Выбери подключение готовой карты.')
@@ -329,6 +331,8 @@ def prepare_card(mount, source_root, rom_dirs, progress=lambda text: None):
                 copy_verified(p, roms / p.relative_to(folder), progress)
     metadata = portable_metadata(source_root, mount, progress)
     sync.mkdir(parents=True, exist_ok=True)
+    if sync_source is not None:
+        copy_tree(sync_source, sync, progress)
     for filename, value in [('settings.json', {'schema': 2, 'host': '', 'port': 5000, 'games': {}}), ('state.json', {})]:
         if not (sync / filename).exists():
             card.write_changed(sync / filename, value)
@@ -366,6 +370,90 @@ def native_paths(home):
     if not launcher.is_file() or not (backend / 'functions/EmuScripts/emuDeckRyujinx.sh').is_file():
         raise SetupError('The stock EmuDeck Ryujinx launcher is missing. Install Ryujinx through EmuDeck first.')
     return roms, launcher
+
+
+def install_app(tx, package, home, local, steam_config, original_shortcuts, sync_module, repairs=()):
+    """Install the sync application; game-library management belongs to SRM."""
+    for name in RUNTIME:
+        tx.replace(local / name, (package / 'app' / name).read_bytes())
+    for path in sorted((package / 'art').iterdir()):
+        if path.is_file():
+            tx.replace(local / 'art' / path.name, path.read_bytes())
+    for name in ('LICENSE', 'VERSION'):
+        tx.replace(local / name, (package / name).read_bytes())
+    mode = ' sync' if sync_module == 'native_card.py' else ''
+    script = '#!/bin/sh\nset -eu\nBASE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec /usr/bin/python3 "$BASE/' + sync_module + '"' + mode + ' "$@"\n'
+    tx.replace(local / 'sync.sh', script.encode(), mode=0o755)
+    if steam_config is not None:
+        entry = {'appname': 'Switch Deck Sync', 'exe': '"' + str(local / 'sync.sh') + '"',
+                 'StartDir': '"' + str(local) + '"', 'LaunchOptions': '', 'icon': str(local / 'art/icon.ico')}
+        data, ids = steam_shortcuts.upsert(original_shortcuts, [entry, *repairs])
+        tx.replace(steam_config / 'shortcuts.vdf', data)
+        for source, suffix in [('cover', 'p'), ('hero', '_hero'), ('logo', '_logo'), ('grid', '')]:
+            tx.replace(steam_config / 'grid' / (str(ids['Switch Deck Sync']) + suffix + '.png'),
+                       (package / 'art' / (source + '.png')).read_bytes())
+    text = '[Desktop Entry]\nType=Application\nName=Switch Deck Sync\nExec=' + quoted_exec(local / 'sync.sh') + '\nIcon=' + str(local / 'art/icon.png') + '\nTerminal=false\nCategories=Game;Utility;\n'
+    tx.replace(home / '.local/share/applications/switch-deck-sync.desktop', text.encode())
+
+
+def check_pending_setup(local):
+    for pending in (local / 'backups').glob('*/transaction.json'):
+        if card.read(pending)['status'] == 'in-progress':
+            raise SetupError('Interrupted setup: restore it first. / Восстанови прерванную установку: ' + str(pending.parent))
+
+
+def install_sync_only(package, home, source_root, steam_config=None, idle_check=None):
+    """Add save sync to an existing Ryujinx setup without requiring a card/EmuDeck."""
+    idle_check = idle_check or (lambda: require_idle(steam=steam_config is not None))
+    idle_check()
+    if not (source_root / 'Config.json').is_file() or not (source_root / 'bis/user/save').is_dir():
+        raise SetupError('Start Ryujinx once and select its data folder. / Один раз запусти Ryujinx и выбери его папку данных.')
+    local = home / '.local/share/switch-deck-sync'
+    local.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if (home / '.config/systemd/user' / native_card.UNIT).exists() or legacy_migration.detect(home):
+        raise SetupError('Update the existing card installation, or restore it before choosing standalone sync.')
+    info = local / 'installation.json'
+    if info.is_file() and card.read(info).get('architecture') != 'sync-only':
+        raise SetupError('Restore the existing installation before changing its mode.')
+    check_pending_setup(local)
+    data_dir = local / 'data'
+    if data_dir.is_symlink():
+        raise SetupError('Unexpected local sync data link')
+    if (data_dir / 'pending.json').exists():
+        raise SetupError('Finish the interrupted sync before updating. / Сначала восстанови прерванную передачу.')
+    settings_path = data_dir / 'settings.json'
+    if settings_path.is_file() and Path(card.read(settings_path).get('ryujinx_dir', '')).absolute() != source_root.absolute():
+        raise SetupError('Keep the same Ryujinx data folder when updating this installation.')
+    shortcut_path = steam_config / 'shortcuts.vdf' if steam_config else None
+    original = shortcut_path.read_bytes() if shortcut_path and shortcut_path.exists() else b''
+    if original:
+        steam_shortcuts.decode(original)
+    with card.session_lock(local):
+        # User settings/history outlive restoring the application installation.
+        data_dir.mkdir(mode=0o700, exist_ok=True)
+        if not settings_path.exists():
+            card.write_changed(settings_path, {'schema': 2, 'host': '', 'port': 5000, 'games': {},
+                               'ryujinx_dir': str(source_root), 'save_root': str(source_root / 'bis/user/save')})
+            settings_path.chmod(0o600)
+        if not (data_dir / 'state.json').exists():
+            card.write_changed(data_dir / 'state.json', {})
+            (data_dir / 'state.json').chmod(0o600)
+        stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:6]
+        tx = Transaction(local / 'backups' / stamp)
+        try:
+            idle_check()
+            current = shortcut_path.read_bytes() if shortcut_path and shortcut_path.exists() else b''
+            if current != original:
+                raise SetupError('Steam shortcuts changed during setup. Close Steam and retry.')
+            install_app(tx, package, home, local, steam_config, original, 'sync_launcher.py')
+            tx.replace(info, json_bytes({'version': VERSION, 'architecture': 'sync-only',
+                       'backup': str(tx.folder), 'source_root': str(source_root),
+                       'steam_config': str(steam_config) if steam_config else None}))
+            tx.commit()
+            return {'local': str(local), 'backup': str(tx.folder)}
+        except BaseException:
+            tx.rollback()
+            raise
 
 
 def unit_contents(local):
@@ -411,9 +499,7 @@ def install(package, home, mount, slot, executable, source_root, steam_config,
 
 def _install(package, home, mount, slot, executable, source_root, steam_config,
              mode, rom_dirs, progress, idle_check, local):
-    for pending in (local / 'backups').glob('*/transaction.json'):
-        if card.read(pending)['status'] == 'in-progress':
-            raise SetupError('Interrupted setup: restore it first. / Восстанови прерванную установку: ' + str(pending.parent))
+    check_pending_setup(local)
     if mode not in ('attach', 'prepare'):
         raise SetupError('Unknown setup mode')
     if not mount.is_mount():
@@ -424,9 +510,10 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
     root = home / '.config/Ryujinx'
     if source_root.absolute() != root.absolute() or root.is_symlink():
         raise SetupError('Use the standard EmuDeck Ryujinx data folder. Portable/managed emulator roots are not supported.')
+    previous = None
     if (local / 'installation.json').is_file():
         previous = card.read(local / 'installation.json')
-        if previous.get('architecture') != 'native-emudeck':
+        if previous.get('architecture') not in ('native-emudeck', 'sync-only'):
             raise SetupError('Restore the older custom-launcher installation before installing this version.')
     source_config = card.read(root / 'Config.json')
     if not isinstance(source_config, dict):
@@ -434,7 +521,11 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
     original_shortcuts = (steam_config / 'shortcuts.vdf').read_bytes() if (steam_config / 'shortcuts.vdf').exists() else b''
     if original_shortcuts:
         steam_shortcuts.decode(original_shortcuts)
-    manifest = prepare_card(mount, source_root, rom_dirs, progress) if mode == 'prepare' else card.validated_manifest(mount)
+    local_data = local / 'data'
+    if (local_data / 'pending.json').exists():
+        raise SetupError('Finish the interrupted local sync before connecting a portable library.')
+    sync_source = local_data if previous and previous.get('architecture') == 'sync-only' and (local_data / 'settings.json').is_file() else None
+    manifest = prepare_card(mount, source_root, rom_dirs, progress, sync_source) if mode == 'prepare' else card.validated_manifest(mount)
     if not (card.contained(mount, manifest['data_dir']) / 'system/prod.keys').is_file():
         raise SetupError('The card has no dumped prod.keys. / На подготовленной карте отсутствуют ключи.')
     firmware = card.contained(mount, manifest['data_dir']) / 'bis/system/Contents/registered'
@@ -448,16 +539,10 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
     if (sync / 'pending.json').exists():
         raise SetupError('Finish the interrupted sync on the previous computer first. / Сначала восстанови прерванную синхронизацию.')
     migration = legacy_migration.plan(home, root, launcher, copy_tree, local, manifest['library_id'], progress)
+    repairs = legacy_migration.shortcut_repairs(original_shortcuts, migration, launcher, roms, catalog)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:6]
     tx = Transaction(local / 'backups' / stamp)
     try:
-        for name in RUNTIME:
-            tx.replace(local / name, (package / 'app' / name).read_bytes())
-        for p in sorted((package / 'art').iterdir()):
-            if p.is_file():
-                tx.replace(local / 'art' / p.name, p.read_bytes())
-        for name in ('LICENSE', 'VERSION'):
-            tx.replace(local / name, (package / name).read_bytes())
         active = local / 'active'
         tx.replace(active, link=Path('/dev/null'))
         config = dict(source_config)
@@ -474,42 +559,11 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
                 'roms_dir': str(roms / 'switch'), 'patches_dir': str(patches),
                 'native_links': links, 'version': VERSION}
         tx.replace(local / 'host.json', json_bytes(host))
-        script = '#!/bin/sh\nset -eu\nBASE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec /usr/bin/python3 "$BASE/native_card.py" sync "$@"\n'
-        tx.replace(local / 'sync.sh', script.encode(), mode=0o755)
-        entries = [{'appname': 'Switch Deck Sync', 'exe': '"' + str(local / 'sync.sh') + '"',
-                    'StartDir': '"' + str(local) + '"', 'LaunchOptions': '',
-                    'icon': str(local / 'art/icon.ico')},
-                   {'appname': 'Ryujinx', 'exe': '"' + str(launcher) + '"',
-                    'StartDir': '"' + str(launcher.parent) + '"', 'LaunchOptions': '',
-                    'match_names': ['Ryujinx (Emulator)']}]
-        if migration:
-            frontend = migration['frontend']
-            entries.append({'appname': 'EmulationStationDE', 'exe': '"' + str(frontend) + '"',
-                            'StartDir': '"' + str(frontend.parent) + '"', 'LaunchOptions': ''})
-        for game in catalog:
-            filename = str(roms / 'switch' / card.relative_path(game['rom']))
-            if any(c in filename for c in '\x00\r\n'):
-                raise SetupError('Unsupported ROM filename')
-            argument = '"' + filename.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$').replace(chr(96), '\\' + chr(96)) + '"'
-            title = card.game_id(game)
-            name = game.get('name', Path(game['rom']).stem)
-            if not name.endswith(' (Ryujinx)'):
-                name += ' (Ryujinx)'
-            entries.append({'appname': name,
-                            **({'title_id': title} if title else {}),
-                            'exe': '"' + str(launcher) + '"', 'StartDir': '"' + str(launcher.parent) + '"',
-                            'LaunchOptions': '--fullscreen ' + argument})
         idle_check()
         current = (steam_config / 'shortcuts.vdf').read_bytes() if (steam_config / 'shortcuts.vdf').exists() else b''
         if current != original_shortcuts:
             raise SetupError('Steam shortcuts changed during setup. Close Steam and retry.')
-        data, ids = steam_shortcuts.upsert(original_shortcuts, entries)
-        tx.replace(steam_config / 'shortcuts.vdf', data)
-        for source, suffix in [('cover', 'p'), ('hero', '_hero'), ('logo', '_logo'), ('grid', '')]:
-            tx.replace(steam_config / 'grid' / (str(ids['Switch Deck Sync']) + suffix + '.png'),
-                       (package / 'art' / (source + '.png')).read_bytes())
-        text = '[Desktop Entry]\nType=Application\nName=Switch Deck Sync\nExec=' + quoted_exec(local / 'sync.sh') + '\nIcon=' + str(local / 'art/icon.png') + '\nTerminal=false\nCategories=Game;Utility;\n'
-        tx.replace(home / '.local/share/applications/switch-deck-sync.desktop', text.encode())
+        install_app(tx, package, home, local, steam_config, original_shortcuts, 'native_card.py', repairs)
         unit = home / '.config/systemd/user' / native_card.UNIT
         tx.replace(unit, unit_contents(local))
         tx.replace(unit.parent / 'default.target.wants' / native_card.UNIT, link=unit)

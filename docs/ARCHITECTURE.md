@@ -1,8 +1,26 @@
-# Native EmuDeck data attachment
+# Save sync and optional portable libraries
+
+## Primary: standalone save sync
+
+The default installer action attaches save sync to an existing Ryujinx data folder.
+It does not require EmuDeck, removable storage, keys or firmware installation steps.
+No emulator configuration, saves, data links or card service are modified. Common
+native, portable and Flatpak data locations are detected; a folder picker supports
+other locations with Config.json and bis/user/save.
+
+Runtime is local; settings, baseline and transfer backups live in local/data.
+sync_launcher.py holds the setup/session lock and starts the common sync engine
+with this data directory. There is no block-device inventory in this path. Steam
+integration adds only the sync app when a Steam profile is available; the desktop
+application-menu entry is always installed. User sync data survives restore.
+
+## Optional: card data attachment
 
 ## Ownership
 
-Game shortcuts point directly to the existing EmuDeck tools/launchers/ryujinx.sh.
+Steam ROM Manager owns game/emulator shortcut creation and artwork. Setup adds only
+Switch Deck Sync; existing game shortcuts are retained. During legacy migration only,
+existing prototype shortcuts are repaired without adding new entries.
 There is no installed game-launch wrapper, alternate Ryujinx root, per-game Python
 resolver, AutoMap bridge, backend patch or emulator executable call in this project.
 Native EmuDeck/Ryujinx retains startup, updates, controls, gyro and graphics settings.
@@ -64,7 +82,7 @@ the card saves over the original host data or deletes card content. Crash recove
 handles directory moves before and after link publication.
 
 Setup exits Steam before editing shortcuts, preserves recognised shortcut IDs/input
-settings, and adds direct native emulator/game shortcuts plus the standalone sync app.
+settings, and adds the standalone sync app.
 Setup leaves Steam closed. The completion dialog asks the user to open it through
 the normal application menu, so it cannot inherit the installer's desktop identity
 and cgroup. This also applies after restore or installation errors.
@@ -77,8 +95,8 @@ The watch mode starts no emulator process.
 
 ## Boundaries
 
-This is a SteamOS/native Ryujinx/ext4/Internal Storage preview. It does not integrate
-Flatpak/portable roots, multiple MMC readers or Windows. Managed-root 0.2.x hosts
+The portable-card option is a SteamOS/native Ryujinx/ext4/Internal Storage preview.
+It does not integrate Flatpak/portable roots, multiple MMC readers or Windows. Managed-root 0.2.x hosts
 must use their previous restore before installing. Dedicated hardware gyro services
 remain managed by EmuDeck. A fresh Steam Machine hardware acceptance run is pending.
 
@@ -97,3 +115,12 @@ Existing shortcut IDs, artwork and controller associations survive. The old help
 directory is renamed into the same durable rollback transaction, so it is no longer
 available to execute. Restore returns the directory and every changed entry point.
 Card games/saves/profile and sync history are never moved by this migration.
+
+## SRM artwork exports
+
+The artwork action retains SRM's native _selections.json/selections.json and referenced
+images, byte-for-byte. It copies only validated relative image references into
+Emulation/artwork/srm-image-choices, verifies content hashes and publishes the completed
+folder by rename. Previous exports and the source are retained. No Steam grid files,
+parser preferences or game shortcuts are changed by this action. Exporting directly
+to the parent folder and importing the resulting package are performed by SRM itself.

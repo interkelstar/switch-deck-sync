@@ -13,8 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = ['install.py', 'install.sh', 'Install.desktop', 'README.md', 'LICENSE', 'VERSION',
          'app/card_library.py', 'app/switch_save_sync.py', 'app/sync_config.py', 'app/sync_ui.py',
          'app/setup_library.py', 'app/setup_wizard.py', 'app/steam_shortcuts.py',
-         'app/native_card.py', 'app/legacy_migration.py',
-         'docs/ARCHITECTURE.md', 'docs/SWITCH.md', 'docs/STEAM-MACHINE-TEST.md',
+         'app/native_card.py', 'app/legacy_migration.py', 'app/sync_launcher.py', 'app/srm_artwork.py',
+         'docs/ARCHITECTURE.md', 'docs/SWITCH.md', 'docs/STEAM-MACHINE-TEST.md', 'docs/ARTWORK.md',
          'switch/ftpsrv-save-sync.nro', 'switch/source.zip', 'switch/save-write.patch',
          'switch/config.ini.example', 'switch/THIRD-PARTY-NOTICES.txt']
 ART = ['cover.png', 'hero.png', 'grid.png', 'logo.png', 'logo.svg', 'icon.png', 'icon.svg',

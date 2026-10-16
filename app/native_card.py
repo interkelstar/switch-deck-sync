@@ -3,7 +3,6 @@ import json
 import os
 from pathlib import Path
 import signal
-import shutil
 import subprocess
 import sys
 import time
@@ -251,20 +250,8 @@ def run_sync(args, local=LOCAL):
             raise card.LibraryError('Карта ещё не подключена. Повтори запуск через секунду.')
         if not (Path(host['ryujinx_dir']) / 'bis').resolve().is_relative_to(mount.resolve()):
             raise card.LibraryError('Подключена другая библиотека. Закрой игры и подожди подключения карты.')
-        env = dict(os.environ, SDS_DATA_DIR=str(local / 'active/sync'))
-        command = ['/usr/bin/python3', str(local / 'switch_save_sync.py'), *args]
-        if shutil.which('systemd-inhibit'):
-            prefix = ['systemd-inhibit', '--no-ask-password', '--what=sleep:idle', '--mode=block']
-            if subprocess.run([*prefix, '/usr/bin/true'], capture_output=True).returncode == 0:
-                command = [*prefix, '--who=Switch Deck Sync', '--why=Save synchronisation', *command]
-        child = subprocess.Popen(command, env=env)
-        previous = {sig: signal.signal(sig, lambda s, f: child.send_signal(s))
-                    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
-        try:
-            return child.wait()
-        finally:
-            for sig, handler in previous.items():
-                signal.signal(sig, handler)
+        from sync_launcher import launch
+        return launch(local / 'active/sync', args, local, portable=True)
 
 
 def main(args=None):

@@ -201,3 +201,31 @@ def apply(tx, migration, local):
     # Keep a complete undoable copy, but remove the old runtime from its live
     # location so no surviving shortcut can accidentally execute it.
     tx.park(migration['old'])
+
+
+def shortcut_repairs(data, migration, launcher, roms, catalog):
+    """Repair only existing prototype shortcuts; never add games or emulators."""
+    if not migration or not data:
+        return []
+    import steam_shortcuts
+    games = {game.get('title_id', '').upper(): game for game in catalog}
+    repairs = []
+    for shortcut in steam_shortcuts.decode(data).get('shortcuts', {}).values():
+        exe = shortcut.get('exe', '').strip('"')
+        if exe == str(migration['old'] / 'frontend.sh'):
+            target = migration['frontend']
+            arguments = shortcut.get('LaunchOptions', '')
+        elif exe == str(migration['old'] / 'ryujinx.sh'):
+            target = launcher
+            arguments = shortcut.get('LaunchOptions', '')
+            if arguments:
+                found = [game for title, game in games.items() if title and title in arguments.upper()]
+                if len(found) != 1:
+                    raise ValueError('Cannot map an existing legacy game shortcut: ' + shortcut['appname'])
+                filename = str(roms / 'switch' / found[0]['rom'])
+                arguments = '--fullscreen "' + filename.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$').replace('`', '\\`') + '"'
+        else:
+            continue
+        repairs.append({'appname': shortcut['appname'], 'exe': '"' + str(target) + '"',
+                        'StartDir': '"' + str(target.parent) + '"', 'LaunchOptions': arguments})
+    return repairs

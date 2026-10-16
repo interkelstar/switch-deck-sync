@@ -314,15 +314,12 @@ class SetupTests(unittest.TestCase):
         self.assertIn('Fixture User', executed['profile'])
         self.assertEqual(Path(executed['argv'][-1]).read_bytes(), b'fake game')
 
-    def test_game_shortcuts_use_untouched_stock_launcher_and_no_custom_game_wrapper(self):
+    def test_card_install_adds_only_sync_and_preserves_stock_setup(self):
         original = self.launcher.read_bytes()
         self.prepare()
         self.install()
         shortcuts = steam.decode((self.steam / 'shortcuts.vdf').read_bytes())['shortcuts']
-        for value in shortcuts.values():
-            if value['appname'] != 'Switch Deck Sync':
-                self.assertEqual(value['exe'], '"' + str(self.launcher) + '"')
-                self.assertNotIn('--root-data-dir', value['LaunchOptions'])
+        self.assertEqual([value['appname'] for value in shortcuts.values()], ['Switch Deck Sync'])
         self.assertEqual(self.launcher.read_bytes(), original)
         self.assertFalse((self.local / 'ryujinx.sh').exists())
         self.assertFalse((self.local / 'ryujinx').exists())
@@ -332,6 +329,19 @@ class SetupTests(unittest.TestCase):
         self.assertTrue(config['docked_mode'])
         self.assertEqual(config['custom'], {'proof': 'preserve'})
         self.assertEqual(self.settings.read_text(), 'autoMapSwitch="false"\n')
+
+    def test_card_update_preserves_srm_and_existing_game_entries_exactly(self):
+        self.prepare()
+        existing = {'appname': 'My SRM Game', 'exe': '"' + str(self.launcher) + '"',
+                    'appid': 42, 'LaunchOptions': 'custom args', 'StartDir': '/custom',
+                    'tags': {'0': 'Selected games'}, 'icon': '/my/art.ico'}
+        self.steam.mkdir(parents=True)
+        (self.steam / 'shortcuts.vdf').write_bytes(steam.encode({'shortcuts': {'0': existing}}))
+        self.install()
+        self.install()
+        shortcuts = steam.decode((self.steam / 'shortcuts.vdf').read_bytes())['shortcuts']
+        self.assertEqual(shortcuts['0'], existing)
+        self.assertEqual(len(shortcuts), 2)
 
     def test_game_can_launch_with_our_python_runtime_files_unavailable(self):
         self.prepare()
@@ -452,7 +462,7 @@ class SetupTests(unittest.TestCase):
         def reply(*args):
             dialogs.append(args)
             if args[0] == '--radiolist':
-                return '0'
+                return '1' if args[1] == 'What would you like to set up?' else '0'
             if args[0] == '--getexistingdirectory':
                 return str(self.roms)
             return ''
@@ -485,7 +495,7 @@ class SetupTests(unittest.TestCase):
         dialogs = []
         def reply(*args):
             dialogs.append(args)
-            return '1' if args[0] == '--radiolist' and args[1] == 'Language / Язык' else ''
+            return '1' if args[0] == '--radiolist' else ''
         original_install = setup.install
         def install_ui(*args, **kwargs):
             return original_install(*args, **kwargs, idle_check=lambda: None,
