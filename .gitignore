@@ -4,6 +4,7 @@ __pycache__/
 dist/
 .DS_Store
 settings.json
+preferences.json
 state.json
 pending.json
 last-result.json
