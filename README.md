@@ -2,7 +2,7 @@
 
 Portable Nintendo Switch card data and manual Wi-Fi save synchronisation for SteamOS.
 
-**Preview 0.3.0.** Games launch directly through the existing EmuDeck Ryujinx launcher.
+**Preview 0.3.1.** Games launch directly through the existing EmuDeck Ryujinx launcher.
 This application does not launch the emulator, call AutoMap, replace controller
 settings, patch the EmuDeck backend, or add a root-data argument to game shortcuts.
 The setup wizard is English/Russian; the save-sync interface is currently Russian.
@@ -106,10 +106,13 @@ An EmuDeck reset/update may recreate its data links. The service detects a chang
 connection and stops attaching card data instead of overriding EmuDeck. Close games
 and rerun this installer to reconnect. Your card and original host data are retained.
 
-The old 0.2.x previews used custom game launchers. Restore that older installation
-using its original installer before moving that host to this architecture. The first
-Steam Machine client is a fresh host and needs no such migration. The separate older
-Deck prototype continues working with the same prepared card.
+The early schema-2 slot-library Deck prototype is recognised automatically. Setup
+recovers the retained original Ryujinx startup script, preserves warm caches and
+Steam shortcut IDs, repairs stale library paths in EmuDeck/SRM/ES-DE, and retires
+the old helper into its rollback backup. Controller and graphics preferences are
+retained. Migration stops if the original startup script is missing or ambiguous.
+The independently installed 0.2.x previews must still be restored using their
+original installer first; they use a different managed emulator-root layout.
 
 The 0.2.1 preview was withdrawn because its AutoMap bridge did not meet this
 architecture. Do not use it for installation.
@@ -120,6 +123,8 @@ Linux integration tests cover native shortcuts, preservation of AutoMap/manual
 settings, directory backups/rollback, prepared-card attachment, reader/card changes,
 missing cards, data-service restart, profile/cache separation and save transfer.
 A fresh Steam Machine hardware acceptance run is still pending.
+The schema-2 migration is covered by synthetic success, repeat-install and rollback
+tests. Physical Deck game, gyro and Wi-Fi acceptance are recorded separately.
 
 PYTHONPATH=app python3 -m unittest discover -s tests -v
 python3 scripts/build_release.py

@@ -7,8 +7,8 @@ There is no installed game-launch wrapper, alternate Ryujinx root, per-game Pyth
 resolver, AutoMap bridge, backend patch or emulator executable call in this project.
 Native EmuDeck/Ryujinx retains startup, updates, controls, gyro and graphics settings.
 
-The installer detects the host EmuDeck ROM directory from Steam ROM Manager settings
-or narrowly parses EmuDeck's path assignments. It never sources shell settings.
+The installer narrowly parses EmuDeck's path assignments, including toolsPath, and
+uses Steam ROM Manager settings as a fallback. It never sources shell settings.
 The base Emulation location must be Internal Storage for this preview.
 
 ## Host and card layout
@@ -65,7 +65,7 @@ handles directory moves before and after link publication.
 
 Setup exits Steam before editing shortcuts, preserves recognised shortcut IDs/input
 settings, and adds direct native emulator/game shortcuts plus the standalone sync app.
-Existing EmuDeck launcher/backend bytes and global paths remain unchanged. New ROM
+On fresh hosts, existing EmuDeck launcher/backend bytes and global paths remain unchanged. New ROM
 files and renamed files use ordinary Steam ROM Manager refresh.
 
 The installed executable code is local. No code is executed from the card.
@@ -75,6 +75,22 @@ The watch mode starts no emulator process.
 ## Boundaries
 
 This is a SteamOS/native Ryujinx/ext4/Internal Storage preview. It does not integrate
-Flatpak/portable roots, multiple MMC readers or Windows. Old custom-launcher hosts
+Flatpak/portable roots, multiple MMC readers or Windows. Managed-root 0.2.x hosts
 must use their previous restore before installing. Dedicated hardware gyro services
 remain managed by EmuDeck. A fresh Steam Machine hardware acceptance run is pending.
+
+## Early Deck prototype migration
+
+The schema-2 switch-library prototype has a dedicated migration path. The entire
+plan is validated first. The original executable-adjacent Ryujinx.sh must exist in
+the old backups and be unambiguous. Its exact bytes are restored; the existing
+EmuDeck launcher and backend are never patched. Config.json changes only game_dirs.
+Warm caches are copied and hash-verified into the matching local library namespace.
+
+The prototype's card-based global EmuDeck paths are changed to internal Emulation
+paths. Its existing toolsPath is preserved. SRM's stale ROM/tool paths, ES-DE's ROM
+directory/find rule, desktop entries and Steam shortcuts are repaired consistently.
+Existing shortcut IDs, artwork and controller associations survive. The old helper
+directory is renamed into the same durable rollback transaction, so it is no longer
+available to execute. Restore returns the directory and every changed entry point.
+Card games/saves/profile and sync history are never moved by this migration.

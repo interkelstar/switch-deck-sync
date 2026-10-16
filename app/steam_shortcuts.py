@@ -74,7 +74,8 @@ def upsert(data, entries):
     ids = {}
     for entry in entries:
         title = entry.get('title_id')
-        matches = [s for s in shortcuts.values() if s.get('appname') == entry['appname']
+        names = [entry['appname'], *entry.get('match_names', [])]
+        matches = [s for s in shortcuts.values() if s.get('appname') in names
                    and (not title or 'ryujinx' in s.get('exe', '').lower())]
         if not matches and title:
             matches = [s for s in shortcuts.values()
@@ -94,6 +95,6 @@ def upsert(data, entries):
                         'DevkitGameID': '', 'LastPlayTime': 0, 'tags': {}}
             index = max((int(k) for k in shortcuts if k.isdigit()), default=-1) + 1
             shortcuts[str(index)] = shortcut
-        shortcut.update({k: v for k, v in entry.items() if k != 'title_id'})
+        shortcut.update({k: v for k, v in entry.items() if k not in ('title_id', 'match_names')})
         ids[entry['appname']] = shortcut['appid']
     return encode(values), ids

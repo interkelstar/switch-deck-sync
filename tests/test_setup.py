@@ -14,6 +14,8 @@ import steam_shortcuts as steam
 import setup_wizard
 import native_card
 import shlex
+import shutil
+import legacy_migration
 
 PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -109,6 +111,148 @@ class SetupTests(unittest.TestCase):
         self.assertTrue((root / 'bis').is_symlink())
         self.assertEqual((root / 'system').resolve(), self.mount / 'Emulation/storage/ryujinx/data/system')
         self.assertNotIn('card_uuid', card.read(self.mount / 'Emulation/switch-library.json'))
+
+    def legacy_fixture(self):
+        manifest = self.prepare()
+        self.old = self.home / '.local/share/switch-library'
+        self.old.mkdir(parents=True)
+        (self.old / 'card').symlink_to(self.mount)
+        self.cache = self.old / 'libraries' / manifest['library_id'] / 'games'
+        self.cache.mkdir(parents=True)
+        (self.cache / 'warm-cache.bin').write_bytes(b'compiled shader cache')
+        for name in setup.SHARED:
+            shutil.rmtree(self.source / name)
+            (self.source / name).symlink_to(self.old / 'card' / manifest['data_dir'] / name)
+        (self.source / 'games').symlink_to(self.cache)
+        publish = self.home / 'Applications/publish'
+        publish.mkdir()
+        self.exe.rename(publish / 'Ryujinx')
+        self.exe = publish / 'Ryujinx'
+        self.wrapper = publish / 'Ryujinx.sh'
+        self.wrapper.write_text('#!/bin/sh\nexec "' + str(self.old / 'ryujinx.sh') + '" "$@"\n')
+        self.wrapper.chmod(0o755)
+        self.original_wrapper = b'#!/bin/sh\nSCRIPT_DIR=$(dirname "$(realpath "$0")")\nexec "$SCRIPT_DIR/Ryujinx" "$@"\n'
+        before = self.home / 'Emulation/backups/earlier/Ryujinx.before-switch-library.sh'
+        before.parent.mkdir(parents=True)
+        before.write_bytes(self.original_wrapper)
+        # This fixture has the stock toolsPath nested one level deeper, like
+        # existing EmuDeck hosts. It must not be guessed from romsDirectory.
+        new_launcher = self.emu / 'tools/emudeck/launchers/ryujinx.sh'
+        new_launcher.parent.mkdir(parents=True)
+        self.launcher.rename(new_launcher)
+        self.launcher = new_launcher
+        self.launcher.write_text('#!/bin/sh\nexec ' + shlex.quote(str(self.wrapper)) + ' "$@"\n')
+        self.launcher.chmod(0o755)
+        frontend = self.launcher.parent / 'es-de/es-de.sh'
+        frontend.parent.mkdir()
+        frontend.write_text('#!/bin/sh\nexit 0\n')
+        frontend.chmod(0o755)
+        paths = {'emulationPath': str(self.old / 'card/Emulation'),
+                 'romsPath': str(self.old / 'card/Emulation/roms'),
+                 'toolsPath': str(self.launcher.parent.parent),
+                 'biosPath': str(self.old / 'card/Emulation/bios'),
+                 'savesPath': str(self.old / 'card/Emulation/saves'),
+                 'storagePath': str(self.old / 'card/Emulation/storage')}
+        self.settings.write_text('autoMapSwitch="false"\ncontrollerLayout="baxy"\n' +
+                                 ''.join(k + '=' + shlex.quote(v) + '\n' for k, v in paths.items()))
+        put(self.settings.with_suffix('.json'), {'storagePath': str(self.old / 'card'), 'custom': 'preserve'})
+        stale = self.base / 'old-card-512/Emulation'
+        put(self.home / '.config/steam-rom-manager/userData/userSettings.json',
+            {'environmentVariables': {'romsDirectory': str(stale / 'roms'), 'steamDirectory': '/preserve'}})
+        put(self.home / '.config/steam-rom-manager/userData/userConfigurations.json',
+            [{'executable': str(stale / 'tools/launchers/ryujinx.sh'), 'romDirectory': str(stale / 'roms/switch')}])
+        xml = self.home / 'ES-DE/settings/es_settings.xml'
+        xml.parent.mkdir(parents=True)
+        xml.write_text('<?xml version="1.0"?>\n<string name="ROMDirectory" value="' + str(self.old / 'card/Emulation/roms') +
+                       '" />\n<string name="MediaDirectory" value="keep" />')
+        xml = self.home / 'ES-DE/custom_systems/es_find_rules.xml'
+        xml.parent.mkdir(parents=True)
+        xml.write_text('<rules><entry>' + str(self.old / 'ryujinx.sh') + '</entry></rules>')
+        desktop = self.home / '.local/share/applications/Ryujinx.desktop'
+        desktop.parent.mkdir(parents=True, exist_ok=True)
+        desktop.write_text('[Desktop Entry]\nExec="' + str(self.old / 'ryujinx.sh') + '"\nPath=' + str(self.old) + '\n')
+        (self.emu / 'tools/switch-save-sync').symlink_to(self.old / 'card' / manifest['sync_dir'])
+        put(self.old / 'host.json', {'schema': 2, 'ryujinx_dir': str(self.source), 'emulator_executable': str(self.exe)})
+        manifest['games'][0]['name'] = 'Fixture (Ryujinx)'
+        card.write_changed(card.marker_path(self.mount), manifest)
+        self.steam.mkdir(parents=True)
+        shortcuts = {'0': {'appid': 42, 'appname': 'Fixture (Ryujinx)', 'exe': str(self.old / 'ryujinx.sh'),
+                           'LaunchOptions': '--game 0000000000001000', 'tags': {'0': 'preserved'}},
+                     '1': {'appid': 43, 'appname': 'Ryujinx (Emulator)', 'exe': str(self.old / 'ryujinx.sh')},
+                     '2': {'appid': 44, 'appname': 'EmulationStationDE', 'exe': str(self.old / 'frontend.sh')}}
+        (self.steam / 'shortcuts.vdf').write_bytes(steam.encode({'shortcuts': shortcuts}))
+        return manifest
+
+    def test_legacy_migration_retires_wrapper_preserves_cache_controls_and_shortcut_ids(self):
+        manifest = self.legacy_fixture()
+        before = card.read(self.source / 'Config.json')
+        native_launcher = self.launcher.read_bytes()
+        self.install()
+        self.assertFalse(self.old.exists())
+        self.assertEqual(self.wrapper.read_bytes(), self.original_wrapper)
+        self.assertEqual(self.launcher.read_bytes(), native_launcher)
+        after = card.read(self.source / 'Config.json')
+        before['game_dirs'] = [str(self.emu / 'roms/switch')]
+        self.assertEqual(before, after)
+        self.assertEqual((self.source / 'games/warm-cache.bin').read_bytes(), b'compiled shader cache')
+        self.assertEqual(legacy_migration.shell_paths(self.home)['toolsPath'], str(self.launcher.parent.parent))
+        self.assertEqual(legacy_migration.shell_paths(self.home)['romsPath'], str(self.emu / 'roms'))
+        self.assertIn('autoMapSwitch="false"', self.settings.read_text())
+        shortcuts = steam.decode((self.steam / 'shortcuts.vdf').read_bytes())['shortcuts']
+        self.assertEqual(len(shortcuts), 4)
+        self.assertEqual(shortcuts['0']['appid'], 42)
+        self.assertEqual(shortcuts['0']['tags'], {'0': 'preserved'})
+        self.assertEqual(shortcuts['1']['appid'], 43)
+        self.assertEqual(shortcuts['2']['appid'], 44)
+        for shortcut in shortcuts.values():
+            self.assertNotIn(str(self.old), shortcut['exe'])
+            self.assertNotIn('(Ryujinx) (Ryujinx)', shortcut['appname'])
+        result = subprocess.run([str(self.launcher), '--fullscreen', str(self.emu / 'roms/switch' / manifest['games'][0]['rom'])],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Fixture User', card.read(self.source / 'executed.json')['profile'])
+        self.install()  # Native reinstallation works after the legacy runtime is retired.
+        self.assertEqual(len(steam.decode((self.steam / 'shortcuts.vdf').read_bytes())['shortcuts']), 4)
+
+    def test_legacy_service_failure_restores_all_entry_points_and_links(self):
+        self.legacy_fixture()
+        paths = [self.wrapper, self.settings, self.settings.with_suffix('.json'), self.steam / 'shortcuts.vdf',
+                 self.home / 'ES-DE/settings/es_settings.xml', self.home / 'ES-DE/custom_systems/es_find_rules.xml',
+                 self.home / '.local/share/applications/Ryujinx.desktop']
+        before = {p: p.read_bytes() for p in paths}
+        with patch.object(self, 'start_data', side_effect=OSError('service failed')), self.assertRaises(OSError):
+            self.install()
+        self.assertTrue(self.old.is_dir())
+        self.assertEqual(before, {p: p.read_bytes() for p in paths})
+        self.assertEqual((self.source / 'games').resolve(), self.cache)
+        self.assertTrue((self.source / 'system/prod.keys').is_file())
+
+    def test_legacy_missing_original_wrapper_stops_before_functional_changes(self):
+        self.legacy_fixture()
+        (self.home / 'Emulation/backups/earlier/Ryujinx.before-switch-library.sh').unlink()
+        before = self.wrapper.read_bytes()
+        with self.assertRaisesRegex(ValueError, 'original Ryujinx'):
+            self.install()
+        self.assertEqual(self.wrapper.read_bytes(), before)
+        self.assertTrue(self.old.is_dir())
+        self.assertFalse((self.local / 'installation.json').exists())
+
+    def test_legacy_retry_after_service_materialised_portable_metadata(self):
+        manifest = self.legacy_fixture()
+        relative = '0000000000001000/updates.json'
+        put(self.cache / relative, {'selected': str(self.old / 'card/old-update.nsp')})
+        manifest['game_metadata'] = {relative: {'selected': '@CARD@/Emulation/storage/ryujinx/patchesAndDlc/update.nsp'}}
+        card.write_changed(card.marker_path(self.mount), manifest)
+        real_start = self.start_data
+        def start_then_fail(local, identity):
+            real_start(local, identity)
+            raise OSError('ready handshake failed after attachment')
+        with patch.object(self, 'start_data', side_effect=start_then_fail), self.assertRaises(OSError):
+            self.install()
+        self.assertTrue(self.old.is_dir())
+        self.install()
+        self.assertFalse(self.old.exists())
+        self.assertIn(str(self.local / 'active/card'), card.read(self.source / 'games' / relative)['selected'])
 
     def test_second_host_uses_card_profile_but_own_controller(self):
         self.prepare()
@@ -317,7 +461,8 @@ class SetupTests(unittest.TestCase):
                     'children': [{'path': '/dev/mmcblk0p1', 'type': 'part', 'fstype': 'ext4', 'mountpoints': [str(self.mount)]}]}]
         original_install = setup.install
         def install_ui(*args, **kwargs):
-            return original_install(*args, **kwargs, service_start=self.start_data, service_stop=self.stop_data)
+            return original_install(*args, **kwargs, idle_check=lambda: None,
+                                    service_start=self.start_data, service_stop=self.stop_data)
         with patch.object(wizard, 'dialog', side_effect=reply), patch.object(wizard, 'dependencies'), \
                 patch.object(wizard, 'close_steam'), patch.object(card, 'block_devices', return_value=devices), \
                 patch.object(Path, 'is_mount', return_value=True), patch.object(setup_wizard.shutil, 'which', return_value=None), \

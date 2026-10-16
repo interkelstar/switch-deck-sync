@@ -6,18 +6,17 @@ import os
 from pathlib import Path
 import re
 import shutil
-import stat
-import shlex
 import uuid
 
 import card_library as card
 import steam_shortcuts
 import native_card
+import legacy_migration
 
-VERSION = '0.3.0-preview'
+VERSION = '0.3.1-preview'
 SHARED = ('bis', 'system', 'mods', 'sdcard')
 RUNTIME = ('card_library.py', 'native_card.py', 'switch_save_sync.py', 'sync_config.py', 'sync_ui.py',
-           'setup_library.py', 'setup_wizard.py', 'steam_shortcuts.py')
+           'setup_library.py', 'setup_wizard.py', 'steam_shortcuts.py', 'legacy_migration.py')
 
 
 class SetupError(Exception):
@@ -155,6 +154,20 @@ class Transaction:
         sync_dir(self.folder)
         path.symlink_to(target, target_is_directory=True)
         sync_dir(path.parent)
+
+    def park(self, path):
+        """Retire an old runtime by rename; restore uses the same directory journal."""
+        path = Path(path).absolute()
+        if not path.is_dir() or path.is_symlink() or path.stat().st_dev != self.folder.stat().st_dev:
+            raise SetupError('Cannot safely retire legacy runtime: ' + str(path))
+        if any(i['path'] == str(path) for i in self.items):
+            raise SetupError('Duplicate transaction target: ' + str(path))
+        backup = self.folder / ('original-' + str(len(self.items)))
+        self.items.append({'path': str(path), 'backup': backup.name, 'directory': True})
+        self.save()
+        path.rename(backup)
+        sync_dir(path.parent)
+        sync_dir(self.folder)
 
     def rollback(self):
         restore(self.folder)
@@ -345,28 +358,10 @@ def quoted_exec(path):
 
 def native_paths(home):
     """Read path fields only; never execute or print EmuDeck's shell settings."""
-    settings = home / '.config/steam-rom-manager/userData/userSettings.json'
-    value = card.read(settings).get('environmentVariables', {}).get('romsDirectory') if settings.is_file() else None
-    if not value:
-        shell = home / '.config/EmuDeck/settings.sh'
-        values = {'HOME': str(home)}
-        if shell.is_file():
-            for line in shell.read_text().splitlines():
-                match = re.match(r'^(?:export\s+)?(emulationPath|romsPath)=(.*)$', line.strip())
-                if not match:
-                    continue
-                tokens = shlex.split(match[2], comments=True)
-                if len(tokens) != 1 or '`' in tokens[0] or '$(' in tokens[0]:
-                    raise SetupError('Unsupported EmuDeck library path; open EmuDeck and finish setup first.')
-                text = tokens[0]
-                for key, replacement in values.items():
-                    text = text.replace('${' + key + '}', replacement).replace('$' + key, replacement)
-                values[match[1]] = text
-        value = values.get('romsPath') or (str(Path(values['emulationPath']) / 'roms') if values.get('emulationPath') else None)
-    if not value or '$' in value or not Path(value).is_absolute():
-        raise SetupError('Install EmuDeck and Steam ROM Manager first. / Сначала заверши установку EmuDeck.')
-    roms = Path(value)
-    launcher = roms.parent / 'tools/launchers/ryujinx.sh'
+    try:
+        roms, launcher = legacy_migration.native_paths(home)
+    except ValueError as ex:
+        raise SetupError(str(ex)) from ex
     backend = home / '.config/EmuDeck/backend'
     if not launcher.is_file() or not (backend / 'functions/EmuScripts/emuDeckRyujinx.sh').is_file():
         raise SetupError('The stock EmuDeck Ryujinx launcher is missing. Install Ryujinx through EmuDeck first.')
@@ -452,6 +447,7 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
     sync = card.contained(mount, manifest['sync_dir'])
     if (sync / 'pending.json').exists():
         raise SetupError('Finish the interrupted sync on the previous computer first. / Сначала восстанови прерванную синхронизацию.')
+    migration = legacy_migration.plan(home, root, launcher, copy_tree, local, manifest['library_id'], progress)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:6]
     tx = Transaction(local / 'backups' / stamp)
     try:
@@ -484,14 +480,22 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
                     'StartDir': '"' + str(local) + '"', 'LaunchOptions': '',
                     'icon': str(local / 'art/icon.ico')},
                    {'appname': 'Ryujinx', 'exe': '"' + str(launcher) + '"',
-                    'StartDir': '"' + str(launcher.parent) + '"', 'LaunchOptions': ''}]
+                    'StartDir': '"' + str(launcher.parent) + '"', 'LaunchOptions': '',
+                    'match_names': ['Ryujinx (Emulator)']}]
+        if migration:
+            frontend = migration['frontend']
+            entries.append({'appname': 'EmulationStationDE', 'exe': '"' + str(frontend) + '"',
+                            'StartDir': '"' + str(frontend.parent) + '"', 'LaunchOptions': ''})
         for game in catalog:
             filename = str(roms / 'switch' / card.relative_path(game['rom']))
             if any(c in filename for c in '\x00\r\n'):
                 raise SetupError('Unsupported ROM filename')
             argument = '"' + filename.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$').replace(chr(96), '\\' + chr(96)) + '"'
             title = card.game_id(game)
-            entries.append({'appname': game.get('name', Path(game['rom']).stem) + ' (Ryujinx)',
+            name = game.get('name', Path(game['rom']).stem)
+            if not name.endswith(' (Ryujinx)'):
+                name += ' (Ryujinx)'
+            entries.append({'appname': name,
                             **({'title_id': title} if title else {}),
                             'exe': '"' + str(launcher) + '"', 'StartDir': '"' + str(launcher.parent) + '"',
                             'LaunchOptions': '--fullscreen ' + argument})
@@ -509,6 +513,7 @@ def _install(package, home, mount, slot, executable, source_root, steam_config,
         unit = home / '.config/systemd/user' / native_card.UNIT
         tx.replace(unit, unit_contents(local))
         tx.replace(unit.parent / 'default.target.wants' / native_card.UNIT, link=unit)
+        legacy_migration.apply(tx, migration, local)
         tx.replace(local / 'installation.json', json_bytes({'version': VERSION, 'architecture': 'native-emudeck',
                    'backup': str(tx.folder), 'steam_config': str(steam_config), 'source_root': str(source_root)}))
         return {'local': str(local), 'backup': str(tx.folder), 'games': len(catalog)}, tx, manifest['library_id']
