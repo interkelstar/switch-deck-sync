@@ -112,6 +112,45 @@ class SetupTests(unittest.TestCase):
         self.assertEqual((root / 'system').resolve(), self.mount / 'Emulation/storage/ryujinx/data/system')
         self.assertNotIn('card_uuid', card.read(self.mount / 'Emulation/switch-library.json'))
 
+    def test_same_card_return_imports_external_metadata_before_export(self):
+        self.install(mode='prepare', rom_dirs=[self.roms])
+        marker = card.marker_path(self.mount)
+        external = card.read(marker)
+        rel = '0000000000002000/updates.json'
+        external['game_metadata'][rel] = {'selected': '@CARD@/Emulation/patch.nsp'}
+        put(marker, external)
+        # A stale local change must not erase newer metadata from the other host.
+        put(self.source / 'games/0000000000001000/updates.json', {'selected': ''})
+        with patch.object(Path, 'is_mount', return_value=True):
+            self.manager.tick(devices=self.devices(), busy=False, allow_mount=False)
+        self.assertEqual(card.read(marker), external)
+        self.assertTrue((self.source / 'games' / rel).is_file())
+        self.assertFalse((self.source / 'games/0000000000001000/updates.json').exists())
+
+    def test_local_metadata_change_still_exports_without_external_change(self):
+        self.install(mode='prepare', rom_dirs=[self.roms])
+        rel = '0000000000001000/updates.json'
+        put(self.source / 'games' / rel, {'selected': ''})
+        with patch.object(Path, 'is_mount', return_value=True):
+            self.manager.tick(devices=self.devices(), busy=False, allow_mount=False)
+            self.assertEqual(card.read(card.marker_path(self.mount))['game_metadata'][rel], {'selected': ''})
+            with patch.object(self.manager, 'attach', wraps=self.manager.attach) as attach:
+                self.manager.tick(devices=self.devices(), busy=False, allow_mount=False)
+                attach.assert_not_called()
+
+    def test_external_metadata_refresh_waits_for_game_exit(self):
+        self.install(mode='prepare', rom_dirs=[self.roms])
+        marker = card.marker_path(self.mount)
+        external = card.read(marker)
+        rel = '0000000000002000/updates.json'
+        external['game_metadata'][rel] = {'selected': ''}
+        put(marker, external)
+        self.manager.tick(devices=self.devices(), busy=True, allow_mount=False)
+        self.assertEqual(card.read(self.local / 'native-status.json')['state'], 'ready')
+        self.assertEqual(card.read(marker), external)
+        self.manager.tick(devices=self.devices(), busy=False, allow_mount=False)
+        self.assertTrue((self.source / 'games' / rel).is_file())
+
     def legacy_fixture(self):
         manifest = self.prepare()
         self.old = self.home / '.local/share/switch-library'
