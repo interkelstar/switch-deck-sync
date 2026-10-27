@@ -161,6 +161,9 @@ class DataManager:
                      (self.host['patches_dir'], self.patches_path(manifest))]
             card.export_metadata(mount, manifest, self.local / 'active/card', self.root, extra)
             self.metadata = values
+            # Our own export becomes the baseline for detecting another host.
+            updated = card.read(card.marker_path(mount))
+            self.current = (mount, updated, self.current[2])
 
     def tick(self, devices=None, busy=None, allow_mount=True):
         try:
@@ -168,6 +171,14 @@ class DataManager:
             mount, manifest, part = card.locate(self.host, allow_mount, devices)
             signature = self.identity(mount, manifest, part)
             if signature == self.signature:
+                # A sleeping host can miss removal and reinsertion of the same
+                # card. Its filesystem identity stays the same, while another
+                # host may have added or removed updates/DLC in the meantime.
+                previous = self.current[1]
+                if any(manifest.get(k) != previous.get(k) for k in ('game_metadata', 'games')):
+                    if not (active_game() if busy is None else busy):
+                        self.attach(mount, manifest, part)
+                    return
                 try:
                     self.export_changes()
                 except (OSError, ValueError):
