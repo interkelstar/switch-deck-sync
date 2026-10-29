@@ -14,7 +14,7 @@ profile, the application-menu entry is still installed.
 
 ## Install on your computer
 
-1. Download **Switch-Deck-Sync-0.5.0-preview.zip** from the release's **Assets**.
+1. Download **Switch-Deck-Sync-0.5.1-preview.zip** from the release's **Assets**.
    Extract the whole ZIP to an internal folder such as **Downloads**.
 2. Close games, Ryujinx and any running copy of Switch Deck Sync.
 3. Open **Install.desktop** in the extracted folder. If KDE asks, choose

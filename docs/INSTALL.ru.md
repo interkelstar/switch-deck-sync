@@ -14,7 +14,7 @@ SteamOS в Desktop Mode или Linux с KDE, настроенный Ryujinx и �
 
 ## На компьютере
 
-1. Скачай **Switch-Deck-Sync-0.5.0-preview.zip** из **Assets** релиза и распакуй
+1. Скачай **Switch-Deck-Sync-0.5.1-preview.zip** из **Assets** релиза и распакуй
    целиком на внутренний накопитель, например в «Загрузки».
 2. Закрой игры, Ryujinx и Switch Deck Sync.
 3. Открой **Install.desktop**. Если KDE спросит, выбери **Trust / Execute** —

@@ -14,7 +14,7 @@ Before a public release:
   this repository. The source fixtures use fabricated data.
 
 The CI workflow runs tests on pushes and pull requests. For a release, push a version
-tag matching VERSION, such as `v0.5.0-preview`. The workflow tests both interface
+tag matching VERSION, such as `v0.5.1-preview`. The workflow tests both interface
 languages, builds ZIP/tar.gz installers and publishes a GitHub **prerelease** with
 checksums. Assets also include the standalone ftpsrv Save Sync NRO, full source ZIP,
 configuration example and MIT notices. It does not build a stable release automatically.

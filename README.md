@@ -6,7 +6,7 @@ EmuDeck and a separate memory card are optional.
 
 ![Switch Deck Sync](art/grid.png)
 
-**Preview 0.5.0 · English and Russian**
+**Preview 0.5.1 · English and Russian**
 
 [Installation guide](docs/INSTALL.md) · [Инструкция на русском](docs/INSTALL.ru.md)
 · [Switch setup](docs/SWITCH.md) · [Roadmap](ROADMAP.md)
@@ -18,7 +18,7 @@ Download these files from the newest preview's **Assets** on the
 
 | Device | Download | Next step |
 | --- | --- | --- |
-| Steam Deck / Linux | **Switch-Deck-Sync-0.5.0-preview.zip** | Extract the whole ZIP and open **Install.desktop** in Desktop Mode. |
+| Steam Deck / Linux | **Switch-Deck-Sync-0.5.1-preview.zip** | Extract the whole ZIP and open **Install.desktop** in Desktop Mode. |
 | Nintendo Switch | **ftpsrv-save-sync.nro** | Copy to `/switch/` on the Switch SD card and follow [Switch setup](docs/SWITCH.md). |
 
 The Switch companion is also included in the installer's **switch/** folder.
