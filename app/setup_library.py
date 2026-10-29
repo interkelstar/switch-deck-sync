@@ -14,7 +14,7 @@ import steam_shortcuts
 import native_card
 import legacy_migration
 
-VERSION = '0.5.0-preview'
+VERSION = '0.5.1-preview'
 SHARED = ('bis', 'system', 'mods', 'sdcard')
 RUNTIME = ('card_library.py', 'native_card.py', 'switch_save_sync.py', 'sync_config.py', 'sync_ui.py',
            'setup_library.py', 'setup_wizard.py', 'steam_shortcuts.py', 'legacy_migration.py',

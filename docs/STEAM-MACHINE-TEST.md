@@ -42,3 +42,16 @@ Steam game entries and artwork are managed directly with SRM on each host.
 Automated Linux checks use synthetic games, keys/firmware and launcher fixtures.
 They validate data ownership and direct command routing, not hardware performance
 or the correctness of EmuDeck's own controller-detection implementation.
+
+## 0.5.1-preview portable-card fix
+
+The metadata-refresh fix was installed on a Steam Deck and a second SteamOS host.
+The Deck imported the new update/DLC metadata; the owner confirmed Smash fighters
+and built-in controls on Deck. A separate filesystem repair was needed during
+that session and is not a capability or claimed effect of this patch.
+
+Synthetic regression tests reproduce a returned card with unchanged device identity,
+verify external metadata is imported before stale local changes can be exported,
+and check that refresh waits for a running game to exit. The normal local-export
+control also passes. Fresh installation of the 0.5.1 package on physical hardware
+and a complete post-repair Switch synchronization round trip have not been tested.

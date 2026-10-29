@@ -1,5 +1,15 @@
 # Changes
 
+## 0.5.1-preview
+
+- Refresh update/DLC metadata when a prepared card returns with changes from another
+  host, even if removal was missed while the first host was asleep.
+- Import changed card metadata before exporting a stale local cache; defer the
+  refresh while a game or save synchronization is active.
+- Preserve ordinary local metadata exports without repeatedly reconnecting the card.
+- Add regression coverage for returned cards, local exports and active games.
+- Save-transfer behavior and the ftpsrv Save Sync companion are unchanged.
+
 ## 0.5.0-preview
 
 - English/Russian app screens, transfer results, recovery and error messages.
